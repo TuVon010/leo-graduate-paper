@@ -1,0 +1,7 @@
+# Reproduce the previous default parameters. A deliberately overloaded control,
+# not a calibrated general-purpose paper scenario.
+extends: base.yaml
+tasks:
+  hotspot_probability: 0.7
+compute:
+  cpu_cycles_per_second: [4.0e+9, 1.2e+10]

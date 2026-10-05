@@ -1,0 +1,3 @@
+-r requirements.txt
+# CUDA/CPU wheel choice is documented in docs/RL.md. No PyG/Gym dependency.
+torch>=2.7,<3

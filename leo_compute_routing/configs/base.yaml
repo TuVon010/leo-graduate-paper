@@ -1,0 +1,51 @@
+# SI units throughout: seconds, metres, bits, CPU cycles.
+simulation:
+  seed: 42
+  slots: 240
+  slot_seconds: 0.25
+  drain_slots: 1200
+  drop_at_deadline: false
+topology:
+  mode: walker
+  planes: 3
+  sats_per_plane: 8
+  altitude_m: 600000.0
+  inclination_deg: 53.0
+  phase_factor: 1
+  max_isl_distance_m: 6000000.0
+  earth_clearance_m: 10000.0
+  max_degree: 4
+  crosslink_latitude_limit_deg: 50.0
+  link_capacity_bps: 1.0e+9
+  periodic_change_slots: 4
+tasks:
+  arrival_rate_per_slot: 12.0
+  data_bits: [500000.0, 5000000.0]
+  cycles_per_bit: [500.0, 1500.0]
+  deadline_seconds: [0.5, 2.0]
+  hotspot_satellites: [0, 1, 2]
+  # Pilot setting: even a 20 Gcycles/s hotspot has expected local rho < 1.
+  hotspot_probability: 0.3
+compute:
+  # Effective cycles/s model parameter; not a hardware GFLOPS claim.
+  cpu_cycles_per_second: [2.0e+10, 1.0e+11]
+evaluation:
+  warmup_slots: 0
+resource:
+  allocation: sqrt
+routing:
+  max_compute_hops: 3
+  max_path_hops: 4
+  k_paths: 3
+  path_backend: bounded
+  path_expansion_limit: 100000
+  path_search_limit: 30
+  reference_data_bits: 2000000.0
+  reference_rate_fraction: 0.5
+  lookahead_slots: 8
+  deadline_mask: true
+  allow_unverified_future: true
+reward:
+  deadline_penalty: 2.0
+  route_failure_penalty: 2.0
+  normalizer: 12.0

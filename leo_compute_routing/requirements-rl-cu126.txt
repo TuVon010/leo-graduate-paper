@@ -1,0 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cu126
+-r requirements.txt
+# Reproduce this machine's selected CUDA build without replacing other packages.
+torch==2.7.1+cu126

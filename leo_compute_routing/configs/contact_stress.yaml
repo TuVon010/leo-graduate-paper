@@ -1,0 +1,26 @@
+extends: base.yaml
+# Diagnostic synthetic contacts; do not present this as realistic orbital evidence.
+simulation:
+  slots: 160
+  slot_seconds: 0.25
+  drain_slots: 100
+  drop_at_deadline: true
+topology:
+  mode: periodic
+  planes: 2
+  sats_per_plane: 4
+  link_capacity_bps: 80000000.0
+  periodic_change_slots: 4
+tasks:
+  arrival_rate_per_slot: 2.0
+  data_bits: [20000000.0, 60000000.0]
+  cycles_per_bit: [50.0, 150.0]
+  deadline_seconds: [2.0, 6.0]
+  hotspot_satellites: [0, 1]
+  hotspot_probability: 0.7
+compute:
+  cpu_cycles_per_second: [1000000000.0, 20000000000.0]
+routing:
+  lookahead_slots: 24
+reward:
+  normalizer: 2.0

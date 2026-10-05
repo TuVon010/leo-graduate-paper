@@ -1,0 +1,31 @@
+extends: ppo.yaml
+# Short SYNTHETIC integration test. Do not report it as an orbital method result.
+simulation:
+  slots: 8
+  drain_slots: 40
+topology:
+  mode: periodic
+  planes: 2
+  sats_per_plane: 3
+  link_capacity_bps: 100000000.0
+tasks:
+  arrival_rate_per_slot: 2.0
+  hotspot_satellites: [0]
+  hotspot_probability: 0.3
+compute:
+  cpu_cycles_per_second: [1000000000.0, 5000000000.0]
+routing:
+  max_path_hops: 3
+  k_paths: 2
+reward:
+  normalizer: 2.0
+rl:
+  hidden_dim: 32
+  updates: 2
+  epochs: 2
+  episodes_per_update: 1
+  minibatch_steps: 8
+  train_seeds: [42, 43, 44]
+  validation_seeds: [101]
+  validation_every: 1
+  checkpoint_every: 1

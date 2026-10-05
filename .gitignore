@@ -1,0 +1,15 @@
+# 运行产物与生成缓存
+data/
+results/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Python 环境
+.conda-env/
+.venv/
+
+# 构建产物
+build/
+dist/
