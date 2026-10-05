@@ -1,6 +1,7 @@
 from copy import deepcopy
 from pathlib import Path
 import random
+from time import perf_counter
 
 import numpy as np
 import torch
@@ -29,6 +30,9 @@ class PPOAgent:
         if selected_device == "auto":
             selected_device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(selected_device)
+        if self.device.type == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("CUDA was requested but is unavailable. Use --device auto/cpu in the server runner, "
+                               "or --set rl.device=auto/cpu in train_ppo.py.")
         self.model = ActorCritic(self.settings).to(self.device)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.settings["learning_rate"], eps=1e-5)
         self.features = FeatureBuilder(config, self.settings)
@@ -94,7 +98,7 @@ class PPOAgent:
         self.model.eval()
         return float(self.model.encode(self.features.graph_input(observation))[2].item())
 
-    def update(self, buffer):
+    def update(self, buffer, progress=None, log_interval_seconds=10.0):
         if not len(buffer):
             raise ValueError("Cannot update PPO with an empty rollout")
         self.model.train()
@@ -105,7 +109,8 @@ class PPOAgent:
             advantages = (advantages - selected.mean()) / max(float(selected.std()), 1e-6)
         statistics = []
         early_stop = False
-        for _ in range(self.settings["epochs"]):
+        last_report = perf_counter()
+        for epoch in range(self.settings["epochs"]):
             for start in range(0, len(buffer), self.settings["minibatch_steps"]):
                 # One shuffle per epoch is built below; batches contain physical steps, not individual tasks.
                 if start == 0:
@@ -151,6 +156,13 @@ class PPOAgent:
                                    "value_loss": float(value_loss.detach()), "entropy_per_task": float(entropy_bonus.detach()),
                                    "approximate_joint_kl": float(approximate_kl.detach()), "clip_fraction": float(clip_fraction.detach()),
                                    "gradient_norm": float(gradient_norm)})
+                now = perf_counter()
+                if progress and now - last_report >= log_interval_seconds:
+                    last_report = now
+                    progress("[OPTIMIZE] epoch=%s/%s minibatch=%s/%s optimizer_steps=%s loss=%.4f KL=%.6f" % (
+                        epoch + 1, self.settings["epochs"], start // self.settings["minibatch_steps"] + 1,
+                        (len(buffer) + self.settings["minibatch_steps"] - 1) // self.settings["minibatch_steps"],
+                        len(statistics), statistics[-1]["loss"], statistics[-1]["approximate_joint_kl"]))
             if early_stop:
                 break
         self.update_count += 1

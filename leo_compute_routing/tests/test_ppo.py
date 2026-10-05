@@ -160,3 +160,23 @@ def test_training_resume_and_independent_evaluation(tiny_config, tmp_path):
         assert len({row["task_trace_sha256"] for row in same_seed}) == 1
         assert len({row["cpu_capacities_sha256"] for row in same_seed}) == 1
     assert (tmp_path / "evaluation/aggregate.csv").exists()
+
+
+def test_cpu_auto_fallback_and_training_metrics_are_reported(tiny_config, tmp_path, monkeypatch):
+    import csv
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    config = configured(tiny_config, "mlp")
+    config["rl"].update(device="auto", updates=1, episodes_per_update=1)
+    messages = []
+    agent = train_ppo(config, tmp_path / "cpu", progress=messages.append, log_interval_seconds=0.001)
+    assert agent.device.type == "cpu"
+    output = "\n".join(messages)
+    assert "CUDA_available=no GPU_used=no" in output
+    for text in ("[EPISODE]", "P95=", "task_cost=", "link_util=", "[PPO]", "KL=", "[VALIDATION MEAN]",
+                 "[UPDATE DONE] 1/1 (100.0%)", "FPS=", "result_dir="):
+        assert text in output
+    with (tmp_path / "cpu/updates.csv").open(encoding="utf-8") as stream:
+        row = next(csv.DictReader(stream))
+    assert float(row["rollout_fps"]) > 0
+    assert int(row["session_environment_steps"]) == int(row["rollout_steps"])
+    assert float(row["eta_seconds"]) == 0

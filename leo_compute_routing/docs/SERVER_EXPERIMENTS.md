@@ -19,7 +19,7 @@ python -m pip install torch==2.7.1 --index-url https://download.pytorch.org/whl/
 python -m pip install -r requirements-rl.txt
 python -m pip check
 nvidia-smi
-python -c 'import torch; print(torch.__version__, torch.version.cuda); assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))'
+python -c 'import torch; print(torch.__version__, torch.version.cuda); print("CUDA available:", torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU mode")'
 python -m pytest -q
 ```
 
@@ -30,7 +30,7 @@ python -m pip install --force-reinstall --no-deps torch==2.7.1 --index-url https
 python -c 'import torch; print(torch.__version__, torch.version.cuda); assert torch.cuda.is_available()'
 ```
 
-无需 torchvision/torchaudio。没有可用 GPU 时，给训练批量命令加 `--device cpu`。
+无需 torchvision/torchaudio。批量入口默认 `--device auto`：CUDA 可用则训练模型用 GPU，否则用 CPU，并明确打印实际设备。`nvidia-smi` 仅适用于 NVIDIA GPU 服务器。可显式用 `--device cpu`；`--device cuda` 表示必须用 CUDA，无法使用时明确报错，不静默切换。
 
 ## 2. 公共变量与功能检查
 
@@ -51,7 +51,7 @@ python scripts/run_server_experiments.py --suite main --cases compute24 --update
 python scripts/run_server_experiments.py --suite main --cases smoke --updates 1 --output "results/server_smoke_${STAMP}"
 ```
 
-批量入口默认初始化 2026、测试 201、CUDA 训练、CPU 评估，顺序执行。已完成且设置完全一致的训练可复用；每个子命令有独立日志，成功命令记录耗时，失败会停止并保留数据。
+批量入口默认初始化 2026、测试 201、自动选择训练设备、CPU 评估，顺序执行。已完成且实验设置一致的训练可复用；设备选择不改变已完成结果。每个子命令实时输出并同时保存独立日志，成功命令记录耗时，失败会停止并保留数据。
 
 ## 3. 先跑主对比：20 updates
 
@@ -74,11 +74,32 @@ echo "PID=$!"
 tail -f "server_pilot_${STAMP}.log"
 ```
 
-顶层日志显示阶段；训练细节查看：
+训练细节已经实时显示在终端，也可以另开窗口查看子日志：
 
 ```bash
 tail -f "$PILOT/logs/train/compute24/full/init_2026.log"
 ```
+
+### 控制台进度与指标
+
+默认每 10 秒报告一次已完成时隙、admission/drain 阶段、模拟时间、采样 FPS、每秒任务数、活动任务数和累计 reward。一个很慢的 step / minibatch 尚未返回时不能立即刷新。拓扑生成和 PPO 优化也有阶段进度。
+
+每个完整 episode 和每个验证 seed 打印 reward、成功率、平均完成时延、P95、deadline 违约率、路由失败率、截尾率、每任务成本、卫星 CPU/链路利用率及完成任务数。验证汇总采用等权 seed 均值；完成/总任务数是各验证 seed 合计，不能用它重新计算这些均值。Shield 打印预测违规、fallback、候选屏蔽、被屏蔽概率质量与搜索截断比例。
+
+每轮 PPO 打印总/policy/value loss、每任务熵、joint KL、clip fraction、梯度范数、更新前 explained variance、优化次数和 KL early stop。每轮结束打印 update/目标及百分比、耗时、估计 ETA、采样 FPS、全流程训练 FPS、检查点路径；这些时序数据也存入 episodes.csv、validation.csv、updates.csv。
+
+- `environment_fps` / `rollout_FPS`：每秒完成的环境时隙数，包含排空，排除 PPO 优化和验证，不把任务数当 frame。
+- `session_FPS`：本次进程采集的训练时隙数 / 本次训练循环墙钟时间，分母包含优化、验证和保存；续训不虚构之前进程的吞吐。
+- ETA 来自已完成 update 的平均耗时，仅为估计；时隙上限包含最大排空长度，episode 可能提前结束。
+- `[DEVICE]` 区分 CUDA 是否可用与 GPU 是否实际用于模型；使用 GPU 时显示型号、总显存与本进程 PyTorch allocated/reserved 显存。物理仿真和候选搜索仍运行在 CPU，卫星 CPU 利用率是实验系统资源指标。
+
+调整刷新间隔，不改变训练协议，也不影响已完成任务复用：
+
+```bash
+python -u scripts/run_server_experiments.py --suite main --cases compute24 --updates 20 --log-interval-seconds 5 --output "$PILOT"
+```
+
+日志自动分三层保留：每次批量调用的完整终端文本在结果根目录的同级 `console_logs/server_*.log`，每个子任务输出在 `$RUN/logs/.../*.log`，直接调用 train/evaluate/generalization 也在其输出目录同级 `console_logs/` 创建带时间和 PID 的独立文件。启动和结束均打印绝对路径，不需要手动 tee；stderr 与异常栈也保存，失败不记成功状态。直接训练的 training_manifest.json 保存对应 console_log 路径。
 
 ## 4. 从 20 续训到统一 200 updates
 
@@ -202,4 +223,4 @@ python -u scripts/run_server_experiments.py --suite main --cases compute24 conta
 
 每个初始化内的 CI 仅覆盖测试 seed 变异；最终还需考虑训练初始化变异，不能把全部任务或 3×5 组合当成完全独立样本。
 
-本次入口已通过 main 双模型单 seed、同目录复用、续训与资源分配检查；回归 99 项通过。这些是合成功能检查，不是长窗口性能证据。
+本次入口已通过 main 双模型单 seed、同目录复用、续训与资源分配检查；控制台升级后回归 103 项通过，并完成 CPU 批量训练/评估与自动 CUDA 训练。实时转发测试要求子进程在收到父进程对首行的反馈后才退出，覆盖实时性及失败日志保留。这些是合成功能检查，不是长窗口性能证据。

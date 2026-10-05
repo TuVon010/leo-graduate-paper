@@ -7,6 +7,7 @@ import argparse
 from copy import deepcopy
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shlex
@@ -16,6 +17,7 @@ from time import perf_counter
 
 from _bootstrap import PROJECT_ROOT
 from leo_routing.config import fingerprint, load_config
+from leo_routing.utils.console import capture_console, console_log_path
 
 
 CASES = {
@@ -61,11 +63,15 @@ def write_json(path, value):
 
 
 def execute(command, root, name, dry_run=False, inputs=()):
-    """Keep child output outside its data directory; only mark successful calls."""
-    print(shlex.join([str(part) for part in command]), flush=True)
+    """Stream merged child output live AND to disk; preserve nonzero exits."""
+    print("[COMMAND] " + shlex.join([str(part) for part in command]), flush=True)
     if dry_run:
         return
-    signature = {"argv": [str(part) for part in command], "inputs": {}, "configurations": {}}
+    canonical = [str(part) for part in command]
+    if "--log-interval-seconds" in canonical:
+        position = canonical.index("--log-interval-seconds")
+        del canonical[position:position + 2]  # logging cadence does not change the experiment protocol
+    signature = {"argv": canonical, "inputs": {}, "configurations": {}}
     for option in ("--config", "--configs"):
         if option not in command:
             continue
@@ -83,24 +89,47 @@ def execute(command, root, name, dry_run=False, inputs=()):
     if marker.exists():
         if read_json(marker)["signature"] != signature:
             raise ValueError("Completed job arguments changed; choose a new output root: " + name)
-        print("Already completed: " + name, flush=True)
+        print("[JOB REUSE] Already completed: " + name, flush=True)
         return
     log = root / "logs" / (name + ".log")
     log.parent.mkdir(parents=True, exist_ok=True)
     if log.exists():
         raise ValueError("An unfinished job has a log. Preserve it and use a new output root: " + str(log))
     environment = os.environ.copy()
-    environment.update(PYTHONUNBUFFERED="1")
+    environment.update(PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8")
     environment.setdefault("OMP_NUM_THREADS", "1")
     environment.setdefault("MKL_NUM_THREADS", "1")
     started = perf_counter()
-    print("Log: " + str(log), flush=True)
+    print("[JOB START] %s | console_log=%s" % (name, log), flush=True)
     with log.open("w", encoding="utf-8") as stream:
-        subprocess.run([str(part) for part in command], cwd=PROJECT_ROOT, env=environment,
-                       stdout=stream, stderr=subprocess.STDOUT, check=True)
+        process = subprocess.Popen([str(part) for part in command], cwd=PROJECT_ROOT, env=environment,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                   encoding="utf-8", errors="replace", bufsize=1)
+        print("[PROCESS] child_pid=%s" % process.pid, flush=True)
+        try:
+            for line in process.stdout:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+                stream.write(line)
+                stream.flush()
+            returncode = process.wait()
+        except BaseException:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            raise
+        finally:
+            process.stdout.close()
+        if returncode:
+            print("[JOB FAILED] %s | exit=%s | console_log=%s" % (name, returncode, log), flush=True)
+            raise subprocess.CalledProcessError(returncode, command)
     elapsed = perf_counter() - started
     write_json(marker, {"signature": signature, "elapsed_seconds": elapsed})
-    print("Completed %s in %.1f s" % (name, elapsed), flush=True)
+    print("[JOB DONE] %s elapsed=%.1fs | console_log=%s" % (name, elapsed, log), flush=True)
 
 
 def training_path(root, case, variant, initialization):
@@ -117,14 +146,19 @@ def train_case(args, case, variants):
             expected = load_config(config_path, overrides)
             if not args.dry_run and output.exists() and any(output.iterdir()):
                 summary = output / "training_summary.json"
+                saved = load_config(output / "resolved_config.yaml") if (output / "resolved_config.yaml").exists() else {}
+                comparable = deepcopy(expected)
+                for protocol in (saved, comparable):
+                    protocol.get("rl", {}).pop("device", None)
                 if (summary.exists() and (output / "best.pt").exists() and (output / "last.pt").exists()
                         and read_json(summary)["updates"] == args.updates
-                        and fingerprint(load_config(output / "resolved_config.yaml")) == fingerprint(expected)):
-                    print("Reuse completed training: " + str(output), flush=True)
+                        and fingerprint(saved) == fingerprint(comparable)):
+                    print("[TRAIN REUSE] device=%s | result_dir=%s" % (read_json(summary).get("device", "see training_manifest.json"), output), flush=True)
                     continue
                 raise ValueError("Incomplete or different training: %s. Use a new --output with --resume-root %s"
                                  % (output, args.output))
-            command = [sys.executable, "-u", "scripts/train_ppo.py", "--config", config_path, "--output", output]
+            command = [sys.executable, "-u", "scripts/train_ppo.py", "--config", config_path, "--output", output,
+                       "--log-interval-seconds", args.log_interval_seconds]
             for override in overrides:
                 command += ["--set", override]
             inputs = []
@@ -152,6 +186,7 @@ def evaluate_case(args, case, variants, label=None, config=None, algorithms=None
                    "--seeds", *args.test_seeds, "--device", args.eval_device, "--output", output,
                    "--bootstrap-samples", "5000", "--algorithms",
                    *(args.algorithms if algorithms is None else algorithms)]
+        command += ["--log-interval-seconds", args.log_interval_seconds]
         if not own_config:
             command += ["--config", config or PROJECT_ROOT / CASES[case]]
         execute(command, args.output, "eval/%s/%s/init_%s" % (label, case, initialization),
@@ -168,6 +203,7 @@ def generalize(args):
                    "--configs", *[PROJECT_ROOT / ("configs/experiments/contact%s_ppo.yaml" % n) for n in (24, 48, 72, 96)],
                    "--seeds", *args.test_seeds, "--device", args.eval_device, "--algorithms", *args.algorithms,
                    "--output", args.output / "generalization" / ("init_%s" % initialization)]
+        command += ["--log-interval-seconds", args.log_interval_seconds]
         execute(command, args.output, "generalization/init_%s" % initialization, args.dry_run, checkpoints)
 
 
@@ -200,7 +236,7 @@ def sensitivity(args, case):
             evaluate_case(args, case, ["full", "mlp"], "sensitivity/" + parameter + "_" + value, path)
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=SUITES, default="main")
     parser.add_argument("--phase", choices=["train", "evaluate", "both"], default="both")
@@ -209,14 +245,17 @@ def main():
     parser.add_argument("--test-seeds", type=int, nargs="+", default=[201])
     parser.add_argument("--algorithms", choices=BASELINES, nargs="*", default=BASELINES)
     parser.add_argument("--updates", type=int, default=200)
-    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--device", default="auto")
     parser.add_argument("--eval-device", default="cpu")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--resume-root", type=Path)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--log-interval-seconds", type=float, default=10.0)
     args = parser.parse_args()
     if args.updates < 1 or any(i < 0 for i in args.initializations + args.test_seeds):
         parser.error("Use positive updates and nonnegative seeds")
+    if not math.isfinite(args.log_interval_seconds) or args.log_interval_seconds <= 0:
+        parser.error("--log-interval-seconds must be positive and finite")
     for values in (args.cases, args.initializations, args.test_seeds, args.algorithms):
         if len(values) != len(set(values)):
             parser.error("Duplicate cases, seeds or algorithms")
@@ -236,6 +275,10 @@ def main():
             parser.error("Use --suite scale --cases scale48")
     if args.suite == "sensitivity" and args.phase != "evaluate":
         parser.error("Frozen sweeps require --phase evaluate and existing main checkpoints")
+    return args
+
+
+def run(args):
     if args.suite == "audit":
         for case in args.cases:
             execute([sys.executable, "-u", "scripts/audit_route_exposure.py", "--config", PROJECT_ROOT / CASES[case],
@@ -247,7 +290,8 @@ def main():
             sensitivity(args, case)
         return
     variants = SUITES[args.suite]
-    for case in args.cases:
+    for index, case in enumerate(args.cases, 1):
+        print("[CASE] %s (%s/%s) | suite=%s variants=%s" % (case, index, len(args.cases), args.suite, ",".join(variants)), flush=True)
         if args.phase != "evaluate":
             train_case(args, case, variants)
         if args.phase != "train" and args.suite != "scale":
@@ -261,6 +305,22 @@ def main():
                                   algorithms=[], own_config=True)
     if args.suite == "scale" and args.phase != "train":
         generalize(args)
+
+
+def main():
+    args = parse_args()
+    if args.dry_run:
+        run(args)
+        return
+    with capture_console(console_log_path(args.output, "server")) as log:
+        print("[SERVER] suite=%s phase=%s cases=%s initializations=%s test_seeds=%s updates=%s "
+              "training_device=%s eval_device=%s log_interval=%.1fs" % (
+                  args.suite, args.phase, ",".join(args.cases), args.initializations, args.test_seeds, args.updates,
+                  args.device, args.eval_device, args.log_interval_seconds), flush=True)
+        print("[FILES] results=%s | job_logs=%s | complete_console=%s" % (
+            args.output, args.output / "logs", log), flush=True)
+        run(args)
+        print("[SERVER COMPLETE] results=%s | console_log=%s" % (args.output, log), flush=True)
 
 
 if __name__ == "__main__":

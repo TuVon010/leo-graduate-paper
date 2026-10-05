@@ -10,7 +10,7 @@ from .statistics import aggregate_seed_results
 
 
 def evaluate_checkpoints(checkpoints, seeds, output_directory, algorithms=(), config=None,
-                         device="cpu", bootstrap_samples=5000, progress=None):
+                         device="cpu", bootstrap_samples=5000, progress=None, log_interval_seconds=10.0):
     seeds, checkpoints, algorithms = list(seeds), list(checkpoints), list(algorithms)
     if not checkpoints or not seeds or len(set(seeds)) != len(seeds):
         raise ValueError("Supply checkpoints and at least one distinct held-out seed")
@@ -51,7 +51,7 @@ def evaluate_checkpoints(checkpoints, seeds, output_directory, algorithms=(), co
         current = deepcopy(configured)
         current["simulation"]["seed"] = seed
         rows.extend(run_comparison(current, algorithms, output / ("seed_%s" % seed),
-                                   progress=progress, extra_policies=policies))
+                                   progress=progress, extra_policies=policies, log_interval_seconds=log_interval_seconds))
         save_csv(output / "seed_metrics.csv", rows)
     reference = algorithms[0] if algorithms else policies[0].name
     aggregate, paired = aggregate_seed_results(rows, reference, bootstrap_samples)

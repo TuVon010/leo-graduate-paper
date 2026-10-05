@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import json
 from pathlib import Path
+from time import perf_counter
 
 import networkx as nx
 import numpy as np
@@ -106,7 +107,7 @@ def topology_signature(config):
                         "slots": sim["slots"] + sim["drain_slots"] + 1})
 
 
-def generate_topology(config):
+def generate_topology(config, progress=None, log_interval_seconds=10.0):
     sim, topo = config["simulation"], config["topology"]
     length = sim["slots"] + sim["drain_slots"] + 1
     times = np.arange(length) * sim["slot_seconds"]
@@ -114,6 +115,7 @@ def generate_topology(config):
     count = positions.shape[1]
     adjacency = np.empty((length, count, count), dtype=bool)
     distances = np.empty((length, count, count), dtype=np.float64)
+    started = last_report = perf_counter()
     for slot in range(length):
         if topo["mode"] == "walker":
             adjacency[slot], distances[slot] = build_adjacency(positions[slot], topo)
@@ -121,16 +123,23 @@ def generate_topology(config):
             adjacency[slot] = periodic_adjacency(count, slot, topo["periodic_change_slots"])
             distances[slot] = 1000000.0
             np.fill_diagonal(distances[slot], 0.0)
+        now = perf_counter()
+        if progress and now - last_report >= log_interval_seconds:
+            last_report = now
+            progress("[TOPOLOGY] snapshots=%s/%s (%.1f%%) elapsed=%.1fs" % (
+                slot + 1, length, 100 * (slot + 1) / length, now - started))
     capacities = adjacency.astype(float) * topo["link_capacity_bps"]
+    if progress:
+        progress("[TOPOLOGY] complete snapshots=%s satellites=%s elapsed=%.1fs" % (length, count, perf_counter() - started))
     return TopologyTrace(positions, adjacency, distances, capacities,
                          sim["slot_seconds"], topology_signature(config))
 
 
-def get_topology(config, cache_path=None):
+def get_topology(config, cache_path=None, progress=None, log_interval_seconds=10.0):
     signature = topology_signature(config)
     if cache_path and Path(cache_path).exists():
         return TopologyTrace.load(cache_path, signature)
-    trace = generate_topology(config)
+    trace = generate_topology(config, progress, log_interval_seconds)
     if cache_path:
         trace.save(cache_path)
     return trace

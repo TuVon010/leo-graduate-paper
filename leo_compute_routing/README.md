@@ -14,7 +14,7 @@ Linux 服务器优先使用 [服务器单 seed 实验命令](docs/SERVER_EXPERIM
 
 底层通信—计算耦合物理配置为 `configs/experiments/walker_coupled.yaml`；另有匹配低负载、计算密集、链路受限和高倾角接触场景。参数依据与历史物理预检查见 [SCENARIOS.md](docs/SCENARIOS.md)。
 
-项目环境已安装 PyTorch 2.7.1+cu126，RTX 4060 CUDA 验证成功，**99 项测试通过**；新 contact 方法完成 GPU 短轨道训练、独立 seed 合成评估和 48→24/72/96 星短窗口冻结评估。此前五 seed 的 24 星启发式预实验也已保留。问题复核见 [项目复核](docs/PROJECT_REVIEW.md)，当前测试与运行记录见 [验证记录](docs/VALIDATION.md)。默认 `base.yaml` 仍为低负载/KSP 对照，短训练检查不代表正式论文性能。
+项目环境已安装 PyTorch 2.7.1+cu126，RTX 4060 CUDA 验证成功，**103 项测试通过**；新 contact 方法完成 GPU 短轨道训练、独立 seed 合成评估和 48→24/72/96 星短窗口冻结评估。控制台实时显示阶段进度、主要实验指标、FPS 与实际 CPU/GPU 状态，并自动保存完整文本。此前五 seed 的 24 星启发式预实验也已保留。问题复核见 [项目复核](docs/PROJECT_REVIEW.md)，当前测试与运行记录见 [验证记录](docs/VALIDATION.md)。默认 `base.yaml` 仍为低负载/KSP 对照，短训练检查不代表正式论文性能。
 
 ## 配置环境后先运行
 

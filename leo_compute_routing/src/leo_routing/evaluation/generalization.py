@@ -17,7 +17,7 @@ def physical_fingerprint(config):
 
 
 def run_generalization(checkpoints, targets, seeds, output_directory, algorithms=(), device="cpu",
-                       bootstrap_samples=5000, progress=None):
+                       bootstrap_samples=5000, progress=None, log_interval_seconds=10.0):
     checkpoints, seeds, targets = list(checkpoints), list(seeds), dict(targets)
     if not checkpoints or not targets:
         raise ValueError("Provide checkpoints and named target configurations")
@@ -51,7 +51,7 @@ def run_generalization(checkpoints, targets, seeds, output_directory, algorithms
     if progress:
         progress("Evaluating in-domain held-out anchor ...")
     anchor_rows = evaluate_checkpoints(checkpoints, seeds, output / "in_domain", algorithms, anchor,
-                                      device, bootstrap_samples, progress)
+                                      device, bootstrap_samples, progress, log_interval_seconds)
     anchor_index = {(row["algorithm"], row["seed"]): row for row in anchor_rows}
     rows, gaps = [], []
     for name, config in targets.items():
@@ -59,7 +59,7 @@ def run_generalization(checkpoints, targets, seeds, output_directory, algorithms
         if progress:
             progress("Target %s%s" % (name, " (reusing identical in-domain evaluation)" if same else ""))
         target_rows = anchor_rows if same else evaluate_checkpoints(checkpoints, seeds, output / name,
-            algorithms, config, device, bootstrap_samples, progress)
+            algorithms, config, device, bootstrap_samples, progress, log_interval_seconds)
         for row in target_rows:
             cost = row["mean_cost_per_admitted_task_s"]
             reference = anchor_index[(row["algorithm"], row["seed"])]["mean_cost_per_admitted_task_s"]

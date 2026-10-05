@@ -2,6 +2,8 @@
 
 这份说明包含第一阶段工程所需依赖、Conda 创建命令和运行方法。项目源码要求 Python 3.9 及以上；建议新建 Python 3.11 环境。仿真只用 CPU，不需要 CUDA。
 
+Linux 训练环境及自动 CPU/GPU 选择见 [SERVER_EXPERIMENTS.md](SERVER_EXPERIMENTS.md)。批量训练默认 device=auto，无 CUDA 时可用 CPU；控制台明确显示 CUDA_available 与 GPU_used，避免把设备可用误认为模型实际使用了 GPU。
+
 ## 依赖
 
 | 用途 | 包 | 版本约束 |

@@ -1,11 +1,13 @@
 """Compare frozen MLP/GAT checkpoints and existing baselines on held-out seeds."""
 import argparse
+import math
 from datetime import datetime
 from pathlib import Path
 
 from _bootstrap import PROJECT_ROOT
 from leo_routing.baselines import POLICY_NAMES
 from leo_routing.config import load_config
+from leo_routing.utils.console import capture_console, console_log_path
 
 
 def main():
@@ -18,18 +20,24 @@ def main():
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--bootstrap-samples", type=int, default=5000)
+    parser.add_argument("--log-interval-seconds", type=float, default=10.0)
     args = parser.parse_args()
-    try:
-        from leo_routing.evaluation.rl_evaluator import evaluate_checkpoints
-    except ModuleNotFoundError as error:
-        if error.name == "torch":
-            parser.error("PyTorch is missing. See docs/RL.md and requirements-rl.txt.")
-        raise
+    if not math.isfinite(args.log_interval_seconds) or args.log_interval_seconds <= 0:
+        parser.error("--log-interval-seconds must be positive and finite")
     output = args.output or PROJECT_ROOT / "results" / ("ppo_evaluation_" + datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
-    evaluate_checkpoints(args.checkpoints, args.seeds, output, args.algorithms,
-                         load_config(args.config) if args.config else None, args.device,
-                         args.bootstrap_samples, progress=lambda s: print(s, flush=True))
-    print("Evaluation results:", output.resolve())
+    with capture_console(console_log_path(output, "evaluate")) as log:
+        print("[FILES] evaluation_results=%s | console_log=%s" % (output.resolve(), log), flush=True)
+        try:
+            from leo_routing.evaluation.rl_evaluator import evaluate_checkpoints
+        except ModuleNotFoundError as error:
+            if error.name == "torch":
+                parser.error("PyTorch is missing. See docs/RL.md and requirements-rl.txt.")
+            raise
+        evaluate_checkpoints(args.checkpoints, args.seeds, output, args.algorithms,
+                             load_config(args.config) if args.config else None, args.device,
+                             args.bootstrap_samples, progress=lambda s: print(s, flush=True),
+                             log_interval_seconds=args.log_interval_seconds)
+        print("[EVAL COMPLETE] results=%s | console_log=%s" % (output.resolve(), log), flush=True)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,13 @@
 # 第一阶段验证记录
 
+## 控制台与主要指标升级：2026-10-05
+
+- 回归 **103 passed**；新增 stdout/stderr 实时落盘、异常保留、子进程真实实时转发、FPS 时隙计数和无 GPU 自动 CPU 训练/指标检查。
+- 训练/验证打印成功率、平均与 P95 时延、deadline/route/censor、每任务成本、卫星 CPU/链路利用率、PPO 诊断与 Shield 诊断；保存 episode/update 时序 CSV。
+- 默认 10 秒阶段进度，显示实际设备、GPU 型号及显存、吞吐、update 百分比、ETA 和全部结果/日志路径。批量入口不再只重定向到文件；stderr 与 stdout 同步转发，失败不写成功标记。
+- CPU 合成批量入口完成 GAT、MLP 各 1 update、seed=201 与 local 评估，结果 `results/console_upgrade_cpu_20261005/`；直接 auto 训练实际选用 RTX 4060 CUDA，结果 `results/console_upgrade_auto_20261005/`。它们仅验证日志与入口，不作为性能对比。
+- 全控制台在 `results/console_logs/`，批量子日志在根目录 logs/，直接 CLI 日志在对应输出目录同级 console_logs/；training_manifest 保存实际日志路径。
+
 ## 服务器单 seed 入口：2026-10-05
 
 - 完整回归 **99 passed**；新增单 seed 评估/冻结泛化检查，验证 aggregate 与 cost_shift 的 CI 为空，manifest 明确标记 pilot。

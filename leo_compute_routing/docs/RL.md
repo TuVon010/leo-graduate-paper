@@ -4,6 +4,8 @@
 
 本阶段已实现任务条件候选策略、两种编码器、预测可行性 mask、同批预约特征、联合 PPO 更新、训练/验证、检查点恢复及独立测试入口。物理环境和资源执行规则沿用已有引擎，基线没有改动。
 
+训练控制台现在显示 rollout/优化/验证阶段、FPS、ETA、主要实验指标、PPO 诊断和实际 CPU/GPU 状态；默认每 10 秒刷新阶段进度，可用 `--log-interval-seconds 5` 调整。train/evaluate/generalization 会自动保存 stdout、stderr 和异常文本到输出目录同级 console_logs；批量入口实时转发子日志并保存每次完整控制台。详见 [服务器命令与日志说明](SERVER_EXPERIMENTS.md)。
+
 算法依据为 [PPO 原论文](https://arxiv.org/abs/1707.06347) 和 [GAT 原论文](https://arxiv.org/abs/1710.10903)。本项目使用带边特征的多头 GAT 变体和自回归批次动作，不声称与论文网络结构完全相同。
 
 ## 依赖和设备
