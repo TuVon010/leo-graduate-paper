@@ -6,6 +6,10 @@
 
 论文系统模型初稿提供 [英文版](docs/SYSTEM_MODEL.md) 与 [中文版](docs/SYSTEM_MODEL_ZH.md)，包含动态轨道拓扑、整任务卸载、跨时隙共享服务、预测可行性与优化问题，并附代码对应说明。
 
+准备跑实验时，按 [完整实验命令与论文完成度](docs/EXPERIMENTS.md) 执行：先做 24 星轨道预实验，再做多初始化主对比、方法消融、规模迁移与参数扫描。
+
+推荐的通信—计算耦合实验配置为 `configs/experiments/walker_coupled.yaml`；另有匹配低负载、计算密集、链路受限和高倾角接触场景。参数依据、已完成的预检查与训练命令见 [SCENARIOS.md](docs/SCENARIOS.md)。
+
 项目环境已安装 PyTorch 2.7.1+cu126，RTX 4060 CUDA 验证成功，**72 项测试通过**；已跑通 MLP CPU / GAT GPU 短训练与独立 seed 评估。此前五 seed 的 24 星启发式预实验也已保留。问题复核见 [项目复核](docs/PROJECT_REVIEW.md)，各阶段检查见 [验证记录](docs/VALIDATION.md)。默认轨道配置仍为低负载对照，RL 短训练检查不代表正式论文性能。
 
 ## 配置环境后先运行

@@ -1,0 +1,4 @@
+extends: walker_coupled.yaml
+# Matched low-load control: vary only arrival intensity, keep other settings.
+tasks:
+  arrival_rate_per_slot: 1.0

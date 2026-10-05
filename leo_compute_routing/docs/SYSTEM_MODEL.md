@@ -110,6 +110,8 @@ The selected destination $s_u^{\star}$ and path $\pi_u$ remain fixed throughout 
 
 Each established ISL $e=\{s,s'\}$ provides an aggregate service capacity $R_e[n]$. The base model uses a common configured ISL capacity, while the formulation allows snapshot-dependent capacities. An unavailable link has zero capacity. Here, capacity denotes a data service rate in bits per second, rather than radio bandwidth in hertz.
 
+The configured capacity may represent the effective budget assigned to the studied task class, rather than the hardware peak rate. Capacity reserved for other services can be abstracted by this budget; their traffic and the underlying physical-layer link budget are not explicitly simulated.
+
 Let $\mathcal A_e^{\rm tx}(t)$ be the set of tasks currently transmitting over link $e$. Both forwarding directions share the same undirected-link budget. If $r_{u,e}(t)$ is the rate allocated to task $u$, then
 
 $$

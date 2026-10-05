@@ -1,0 +1,11 @@
+extends: ../ppo.yaml
+# Scale study with the same per-satellite offered load and hotspot fraction.
+# Experimental setting, not calibrated hardware or traffic evidence.
+topology:
+  planes: 6
+  sats_per_plane: 8
+tasks:
+  arrival_rate_per_slot: 24.0
+  hotspot_satellites: [0, 1, 2, 3, 4, 5]
+reward:
+  normalizer: 24.0

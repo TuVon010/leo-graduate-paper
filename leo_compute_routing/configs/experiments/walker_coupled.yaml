@@ -1,0 +1,25 @@
+extends: ../ppo.yaml
+# Mechanism-oriented orbital workload, specified before performance ranking.
+# ISL capacity is an effective service budget for the modeled task class.
+simulation:
+  slots: 2400
+  slot_seconds: 0.25
+  drain_slots: 1200
+  drop_at_deadline: false
+topology:
+  mode: walker
+  link_capacity_bps: 200000000.0
+tasks:
+  arrival_rate_per_slot: 4.0
+  data_bits: [20000000.0, 60000000.0]
+  cycles_per_bit: [500.0, 1500.0]
+  deadline_seconds: [2.0, 8.0]
+  hotspot_satellites: [0, 1, 2]
+  hotspot_probability: 0.2
+compute:
+  cpu_cycles_per_second: [40000000000.0, 100000000000.0]
+routing:
+  reference_data_bits: 40000000.0
+  lookahead_slots: 16
+reward:
+  normalizer: 4.0

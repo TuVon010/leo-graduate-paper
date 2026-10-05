@@ -1,0 +1,14 @@
+extends: walker_link_heavy.yaml
+# Dense near-polar shell to preserve network connectivity under latitude limits.
+# Generic Walker-Delta: the actual Iridium constellation uses different plane geometry.
+topology:
+  inclination_deg: 80.0
+  planes: 6
+  sats_per_plane: 11
+  altitude_m: 780000.0
+  max_isl_distance_m: 6400000.0
+tasks:
+  arrival_rate_per_slot: 11.0
+  hotspot_satellites: [0, 1, 2, 3, 4, 5, 6, 7]
+reward:
+  normalizer: 11.0

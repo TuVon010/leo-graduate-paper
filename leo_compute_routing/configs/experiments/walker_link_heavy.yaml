@@ -1,0 +1,4 @@
+extends: walker_coupled.yaml
+# Halve the task-class service budget; input and computing demand unchanged.
+topology:
+  link_capacity_bps: 100000000.0
