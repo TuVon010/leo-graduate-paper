@@ -1,5 +1,7 @@
 # 实验命令与论文完成度
 
+**服务器单 seed 入口：** 最新 Linux 命令见 [SERVER_EXPERIMENTS.md](SERVER_EXPERIMENTS.md)，默认初始化 2026、测试 201，优先计算密集和接触场景。本文 PowerShell 多 seed 命令用于后续扩展。
+
 **方法升级（2026-10-05）：** 接触窗口候选、预约日历 Shield 与跨规模冻结评估已经实现；最新方法命令和消融见 [CONTACT_METHOD.md](CONTACT_METHOD.md)。新推荐入口为 `configs/contact_ppo.yaml` 和 `configs/experiments/contact48_ppo.yaml`；旧 schema-1 检查点不能在当前网络加载，需要重新训练。下文通用实验流程仍有效，但低负载/KSP 配置与历史结果不能当作升级方法的正式数据。
 
 当前代码可以开展正式实验，但已保留的 RL 数据主要是 2-update 合成场景功能检查，尚不足以支持“已收敛”“提出的方法优于基线”或“未来预测在轨道场景有效”的论文结论。可以开始撰写系统模型和方法，实验结论需要下面的训练、对比与消融结果。

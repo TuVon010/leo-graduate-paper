@@ -10,9 +10,11 @@
 
 推荐的新方法配置为 `configs/contact_ppo.yaml`：接触窗口感知候选、预测预约筛选、变规模任务—候选 Graph PPO 和已有局部 KKT 分配。说明、消融和 48→24/72/96 星零样本命令见 [CONTACT_METHOD.md](docs/CONTACT_METHOD.md)。特征 schema 已升级为 2，旧检查点需要重新训练。
 
+Linux 服务器优先使用 [服务器单 seed 实验命令](docs/SERVER_EXPERIMENTS.md)：`scripts/run_server_experiments.py` 默认初始化 2026、测试 201，覆盖主对比、机制消融、资源分配、跨规模和敏感性，支持新目录续训。单 seed 评估不输出置信区间。
+
 底层通信—计算耦合物理配置为 `configs/experiments/walker_coupled.yaml`；另有匹配低负载、计算密集、链路受限和高倾角接触场景。参数依据与历史物理预检查见 [SCENARIOS.md](docs/SCENARIOS.md)。
 
-项目环境已安装 PyTorch 2.7.1+cu126，RTX 4060 CUDA 验证成功，**98 项测试通过**；新 contact 方法完成 GPU 短轨道训练、独立 seed 合成评估和 48→24/72/96 星短窗口冻结评估。此前五 seed 的 24 星启发式预实验也已保留。问题复核见 [项目复核](docs/PROJECT_REVIEW.md)，当前测试与运行记录见 [验证记录](docs/VALIDATION.md)。默认 `base.yaml` 仍为低负载/KSP 对照，短训练检查不代表正式论文性能。
+项目环境已安装 PyTorch 2.7.1+cu126，RTX 4060 CUDA 验证成功，**99 项测试通过**；新 contact 方法完成 GPU 短轨道训练、独立 seed 合成评估和 48→24/72/96 星短窗口冻结评估。此前五 seed 的 24 星启发式预实验也已保留。问题复核见 [项目复核](docs/PROJECT_REVIEW.md)，当前测试与运行记录见 [验证记录](docs/VALIDATION.md)。默认 `base.yaml` 仍为低负载/KSP 对照，短训练检查不代表正式论文性能。
 
 ## 配置环境后先运行
 

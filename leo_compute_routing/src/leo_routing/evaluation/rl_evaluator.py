@@ -12,8 +12,8 @@ from .statistics import aggregate_seed_results
 def evaluate_checkpoints(checkpoints, seeds, output_directory, algorithms=(), config=None,
                          device="cpu", bootstrap_samples=5000, progress=None):
     seeds, checkpoints, algorithms = list(seeds), list(checkpoints), list(algorithms)
-    if not checkpoints or len(seeds) < 2 or len(set(seeds)) != len(seeds):
-        raise ValueError("Supply checkpoints and at least two distinct held-out seeds")
+    if not checkpoints or not seeds or len(set(seeds)) != len(seeds):
+        raise ValueError("Supply checkpoints and at least one distinct held-out seed")
     if len(set(algorithms)) != len(algorithms) or any(isinstance(s, bool) or not isinstance(s, int) or s < 0 for s in seeds):
         raise ValueError("Invalid seeds or duplicate baseline names")
     policies = []
@@ -43,7 +43,9 @@ def evaluate_checkpoints(checkpoints, seeds, output_directory, algorithms=(), co
     save_json(output / "evaluation_study.json", {"seeds": seeds, "learned_policies": [p.name for p in policies],
               "baselines": algorithms, "held_out_seed_check": True, "checkpoint_selection_uses_test": False,
               "evaluation_action": "greedy argmax of each conditional masked distribution",
-              "bootstrap_samples": bootstrap_samples})
+              "bootstrap_samples": bootstrap_samples,
+              "single_seed_pilot": len(seeds) == 1,
+              "confidence_intervals_available": len(seeds) >= 2})
     rows = []
     for seed in seeds:
         current = deepcopy(configured)

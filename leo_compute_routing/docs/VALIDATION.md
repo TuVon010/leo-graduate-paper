@@ -1,5 +1,14 @@
 # 第一阶段验证记录
 
+## 服务器单 seed 入口：2026-10-05
+
+- 完整回归 **99 passed**；新增单 seed 评估/冻结泛化检查，验证 aggregate 与 cost_shift 的 CI 为空，manifest 明确标记 pilot。
+- 新入口 `scripts/run_server_experiments.py` 默认训练初始化 2026、测试 201，覆盖 main / shield / modules / resource / scale / audit / sensitivity，支持 dry-run 与新目录 last.pt 续训。
+- 合成 CPU 检查完成 GAT、MLP 各 1 update，单测试 seed=201 与 local 对比，生成训练图与角色映射；继续至 2 updates，验证恢复训练与独立新目录评估。
+- resource 检查额外训练 equal，并分别使用 full/sqrt 与 equal 的检查点配置评估，没有将 equal 模型切换为 sqrt；已完成模型可复用。
+- all、scale 与 15 点 sensitivity 的命令计划检查通过。长轨道正式训练没有在本次本地执行，不能据此声称收敛或方法优势。
+- 合成结果：`results/server_entry_check_20261005/`、`results/server_entry_resume_check_20261005/`；最终入口复核另存 `results/server_entry_final_check_20261005/`。Linux 安装和命令见 [SERVER_EXPERIMENTS.md](SERVER_EXPERIMENTS.md)。
+
 ## 接触窗口方法升级：2026-10-05
 
 - 最终完整回归：**98 passed**，包含原 72 项及新增接触/预约/泛化边界测试。

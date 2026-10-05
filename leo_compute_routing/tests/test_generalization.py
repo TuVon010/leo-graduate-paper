@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+import csv
 
 import pytest
 
@@ -40,3 +41,19 @@ def test_checkpoint_keeps_own_candidate_generator_during_ablation(tiny_config):
     evaluation = deepcopy(config)
     evaluation["routing"]["candidate_generation"] = "contact"
     assert agent.configure_environment(evaluation)["routing"]["candidate_generation"] == "ksp"
+
+
+def test_single_seed_pilot_has_no_confidence_interval(tiny_config, tmp_path):
+    config = deepcopy(tiny_config)
+    config["rl"] = {"device": "cpu", "hidden_dim": 16}
+    checkpoint = tmp_path / "model.pt"
+    PPOAgent(config).save(checkpoint)
+    rows = run_generalization([checkpoint], {"same": config}, [201], tmp_path / "pilot",
+                              bootstrap_samples=20)
+    assert len(rows) == 1 and rows[0]["seed"] == 201
+    manifest = json.loads((tmp_path / "pilot/in_domain/evaluation_study.json").read_text())
+    assert manifest["single_seed_pilot"] and not manifest["confidence_intervals_available"]
+    for filename in ("in_domain/aggregate.csv", "cost_shift.csv"):
+        with (tmp_path / "pilot" / filename).open(encoding="utf-8") as stream:
+            for row in csv.DictReader(stream):
+                assert row["ci95_low"] == row["ci95_high"] == ""

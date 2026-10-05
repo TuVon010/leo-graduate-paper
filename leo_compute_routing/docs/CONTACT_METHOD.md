@@ -2,6 +2,8 @@
 
 2026-10-05 的代码升级说明。推荐配置是 `configs/contact_ppo.yaml`，训练环境不需要新增依赖。
 
+Linux 单初始化预实验按 [SERVER_EXPERIMENTS.md](SERVER_EXPERIMENTS.md) 执行：初始化 2026、独立测试 seed 201。下文 PowerShell 多 seed 示例供后续扩展；单 seed 评估已支持，CI 留空。
+
 ## 1. “接触窗口感知候选”是什么
 
 同一条链路“现在存在”并不说明大任务能在断开前传完。例如链路还有 2 s、速率 100 Mbit/s：100 Mbit 的任务可能通过，300 Mbit 的任务则需要重新选择路径。多跳时还必须递推数据何时到达下一跳，不能只检查所有链路在当前时刻是否存在。
