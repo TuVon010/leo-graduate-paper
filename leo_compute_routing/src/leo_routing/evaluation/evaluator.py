@@ -16,6 +16,7 @@ from ..tasks.task_generator import generate_task_trace, save_task_trace
 from ..topology.topology_cache import get_topology
 from ..utils.io import save_csv, save_json, save_yaml
 from .calibration import audit_scenario
+from ..agents.diagnostics import add_counts, decision_metrics
 
 
 def evaluate_policy(config, topology, task_trace, cpu_capacities, policy):
@@ -30,9 +31,12 @@ def evaluate_policy(config, topology, task_trace, cpu_capacities, policy):
     started = perf_counter()
     observation, _ = environment.reset()
     decision_seconds, decision_tasks = 0.0, 0
+    diagnostics = {}
     while True:
         decision_start = perf_counter()
         actions = policy.select(observation)
+        if hasattr(policy, "last_decision_metrics"):
+            add_counts(diagnostics, policy.last_decision_metrics)
         duration = perf_counter() - decision_start
         if observation.tasks:
             decision_seconds += duration
@@ -45,6 +49,11 @@ def evaluate_policy(config, topology, task_trace, cpu_capacities, policy):
                "observation_build_seconds": environment.observation_build_seconds,
                "episode_wall_seconds": perf_counter() - started,
                "terminated": terminated, "truncated": truncated}
+    admitted = metrics["all_admitted_task_count"]
+    metrics["mean_cost_per_admitted_task_s"] = (-metrics["total_reward"] * config["reward"]["normalizer"] / admitted
+                                               if admitted else None)
+    if diagnostics:
+        metrics.update(decision_metrics(diagnostics))
     return metrics, environment
 
 
@@ -79,6 +88,8 @@ def run_comparison(config, algorithms, output_directory, topology_cache=None, ta
         "learned_policies": {p.name: getattr(p, "metadata", {}) for p in extra_policies or ()},
         "dependencies": {"numpy": np.__version__, "networkx": nx.__version__, "PyYAML": yaml.__version__},
         "model": "piecewise-snapshot fluid store-and-forward with processor sharing",
+        "candidate_generation": config["routing"].get("candidate_generation", "ksp"),
+        "contact_waiting": "no waiting across unavailable contacts",
         "link_duplex": "shared bidirectional budget", "prediction_is_guarantee": False,
         "utilization_window": "fixed post-warmup admission interval; drain excluded",
         "task_cohort": "arrivals in measurement interval; outcomes followed through drain",

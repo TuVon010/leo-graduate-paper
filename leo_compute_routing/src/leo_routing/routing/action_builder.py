@@ -34,6 +34,9 @@ class CandidateAction:
     topology_feasible: bool
     fully_checked: bool
     feasible: bool
+    contact_margin_seconds: float = 0.0
+    capacity_margin_ratio: float = 0.0
+    search_truncated: bool = False
 
     @property
     def estimated_total_seconds(self):
@@ -43,4 +46,5 @@ class CandidateAction:
         # SI-valued features are normalized by state_builder, not silently here.
         return (self.action.hops, self.route_seconds, self.workload_seconds,
                 self.execution_seconds, self.deadline_margin_seconds,
-                self.bottleneck_bps, float(self.fully_checked), float(self.topology_feasible))
+                self.bottleneck_bps, float(self.fully_checked), float(self.topology_feasible),
+                self.contact_margin_seconds, self.capacity_margin_ratio)

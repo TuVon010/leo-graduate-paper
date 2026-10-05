@@ -34,6 +34,7 @@ evaluation:
 resource:
   allocation: sqrt
 routing:
+  candidate_generation: ksp
   max_compute_hops: 3
   max_path_hops: 4
   k_paths: 3

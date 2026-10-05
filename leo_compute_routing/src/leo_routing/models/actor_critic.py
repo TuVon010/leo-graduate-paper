@@ -36,10 +36,13 @@ class ActorCritic(nn.Module):
         context = self.context_encoder(pooled)
         return nodes, context, self.value_network(context).squeeze(-1)
 
-    def distribution(self, encoded, decision):
+    def logits(self, encoded, decision):
         nodes, context, _ = encoded
-        logits = self.scorer(nodes, context, self.tensor(decision.task), self.tensor(decision.candidates),
+        return self.scorer(nodes, context, self.tensor(decision.task), self.tensor(decision.candidates),
                              decision.source, self.tensor(decision.destinations, torch.long), self.tensor(decision.path_pool))
+
+    def distribution(self, encoded, decision):
+        logits = self.logits(encoded, decision)
         mask = self.tensor(decision.mask, torch.bool)
         if not bool(mask.any()):
             raise ValueError("All-masked decision must have an explicit local fallback")

@@ -115,6 +115,8 @@ def validate_config(config):
     integer(routing["path_expansion_limit"], "path_expansion_limit")
     if routing["path_backend"] not in ("bounded", "yen"):
         raise ValueError("routing.path_backend must be bounded or yen")
+    if routing.get("candidate_generation", "ksp") not in ("ksp", "contact"):
+        raise ValueError("routing.candidate_generation must be ksp or contact")
     if routing["path_search_limit"] < routing["k_paths"]:
         raise ValueError("path_search_limit must be >= k_paths")
     number(routing["reference_data_bits"], "reference_data_bits")

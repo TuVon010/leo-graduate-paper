@@ -1,5 +1,7 @@
 # MLP-PPO 与 GAT-PPO
 
+本版新增接触窗口候选、预测预约 Shield 与冻结跨规模评估，完整说明和最新命令见 [CONTACT_METHOD.md](CONTACT_METHOD.md)。推荐 `configs/contact_ppo.yaml`。特征 schema=2，旧 schema=1 检查点需要重新训练。
+
 本阶段已实现任务条件候选策略、两种编码器、预测可行性 mask、同批预约特征、联合 PPO 更新、训练/验证、检查点恢复及独立测试入口。物理环境和资源执行规则沿用已有引擎，基线没有改动。
 
 算法依据为 [PPO 原论文](https://arxiv.org/abs/1707.06347) 和 [GAT 原论文](https://arxiv.org/abs/1710.10903)。本项目使用带边特征的多头 GAT 变体和自回归批次动作，不声称与论文网络结构完全相同。
@@ -56,11 +58,11 @@ python -m pip install -r requirements-rl.txt
 
 12 维全局摘要包括任务产生阶段进度、批次规模、CPU/传输/传播阶段任务数、已违约数、活动剩余工作、输入需求与 deadline。critic 用节点 mean/max pooling 与这些摘要。摘要没有完整保留所有活动任务的路径和残余状态，因此这是函数近似的状态表示，不是已证明的完整充分统计量。
 
-task MLP 使用数据量、cycles/bit、deadline、独占执行量级与本批选择位置；不把 satellite ID 当连续学习特征。path MLP 融合 8 个既有候选特征、目标 CPU 预约、路径 bit 预约、当前路径传输工作与路径节点 mean pooling。
+task MLP 使用数据量、cycles/bit、deadline、独占执行量级与本批选择位置；不把 satellite ID 当连续学习特征。path MLP 融合 18 维候选特征和路径节点 mean pooling：8 个原候选特征、2 个接触余量、3 个原预约代理、5 个日历完成时间/期限/接触/容量/覆盖特征。
 
 Actor 拼接任务、源、目标、路径和全局 embedding 后输出每个候选 logit。候选数、星数可以变化，网络没有固定候选输出维度。MLP 逐节点编码；GAT 默认 2 层、4 头、hidden=64，并读链路特征。两者共用后续评分头和 critic 结构。
 
-时间以 checkpoint 中的 `time_scale_seconds` 标准化；工作量和任务数使用训练配置的固定尺度，部分长尾特征做 signed log1p。测试不拟合新的归一化统计。GAT 使用 dense 邻域注意力，当前适合 6–72 星；更大网络应改稀疏实现，其 O(N²) 成本不能忽略。
+时间以 checkpoint 中的 `time_scale_seconds` 标准化；数据量和复杂度使用训练配置的固定尺度。计数类全局量按当前星数与训练期固定逐星尺度归一化，部分长尾特征做 signed log1p。测试不拟合新的统计。GAT 使用 dense 邻域注意力，已验证同一权重在 24/48/72/96 星可执行，但其 O(N²) 成本不能忽略。
 
 ## 批次动作与 mask
 
@@ -68,7 +70,7 @@ Actor 拼接任务、源、目标、路径和全局 embedding 后输出每个候
 
 预约是策略特征和 deadline 代价代理，不是精确共享完成时间。Actor 自己学习评分，没有将贪心排名或基线动作硬编码为输出。
 
-mask 先使用环境的预测可行性，再按预约后的代价进行 deadline 筛选。全不可行时显式允许本地候选，记录 fallback；这不表示该任务满足 deadline。mask 关闭时所有当前候选均可采样；future 关闭时环境 H=0，不读取未来拓扑。训练 update 使用采样时保存的候选和 mask，不重新访问实时环境。
+`rl.shield_mode=mask` 保留原预测 mask 和粗工作量代价；`contact` 使用当前活动任务与批次前缀形成的时间日历重算接触/覆盖/期限；`none` 不屏蔽动作。`use_mask=false` 同样关闭屏蔽。全不可行时显式允许本地候选，记录 fallback；这不表示满足 deadline。future 关闭时 H=0，不读取未来拓扑。训练 update 使用采样时保存的候选和 mask，不重新访问实时环境。
 
 一个时隙动作是整个自回归批次。联合概率为各条件概率的乘积，log probability 为其和。**PPO ratio 对联合动作计算一次，不能把同批任务视为独立物理 transition。** 空批次和只有强制动作的时隙仍训练 critic、传播 GAE，但不产生 actor loss。熵项采用已访问前缀上的条件熵均值作为正则估计。
 

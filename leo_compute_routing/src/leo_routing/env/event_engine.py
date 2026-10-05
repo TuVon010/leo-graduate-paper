@@ -57,6 +57,7 @@ class EventEngine:
             raise ValueError("Unknown resource allocation mode")
         self.allocation_mode, self.drop_at_deadline = allocation_mode, drop_at_deadline
         self.now, self.jobs = 0.0, {}
+        self._active_jobs = {}
         self.holding_cost_seconds = 0.0
         self.deadline_misses = self.route_failures = self.completions = 0
         self.cpu_cycles_processed = self.transmitted_bits = 0.0
@@ -74,7 +75,7 @@ class EventEngine:
 
     @property
     def active(self):
-        return tuple(job for job in self.jobs.values() if job.stage in ACTIVE_STAGES)
+        return tuple(self._active_jobs.values())
 
     def queue_cycles(self):
         return queue_cycles(self.active, self.trace.satellite_count)
@@ -106,9 +107,11 @@ class EventEngine:
             if stage == "cpu":
                 job.cpu_arrival_time = self.now
             self.jobs[task.task_id] = job
+            self._active_jobs[task.task_id] = job
 
     def _finish(self, job, status, reason=""):
         job.stage, job.terminal_time, job.failure_reason = status, self.now, reason
+        self._active_jobs.pop(job.task.task_id, None)
         if status == "completed":
             self.completions += 1
         elif status == "route_failed":

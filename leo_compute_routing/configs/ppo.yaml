@@ -8,6 +8,7 @@ rl:
   use_future: true
   use_mask: true
   use_reservations: true
+  shield_mode: mask
   time_scale_seconds: 1.0
   learning_rate: 0.0003
   gamma: 0.995

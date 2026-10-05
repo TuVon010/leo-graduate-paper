@@ -1,0 +1,6 @@
+extends: walker_link_heavy.yaml
+routing:
+  candidate_generation: contact
+  allow_unverified_future: false
+rl:
+  shield_mode: contact

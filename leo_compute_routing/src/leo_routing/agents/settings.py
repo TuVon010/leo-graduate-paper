@@ -4,6 +4,7 @@ import math
 DEFAULTS = {
     "encoder": "gat", "hidden_dim": 64, "gat_heads": 4, "gat_layers": 2,
     "use_future": True, "use_mask": True, "use_reservations": True, "time_scale_seconds": 1.0,
+    "shield_mode": "mask",
     "learning_rate": 3e-4, "gamma": 0.995, "gae_lambda": 0.95, "clip_ratio": 0.2,
     "value_coefficient": 0.5, "entropy_coefficient": 0.01, "max_grad_norm": 0.5,
     "epochs": 4, "minibatch_steps": 16, "target_kl": 0.03,
@@ -20,6 +21,8 @@ def rl_settings(config):
     settings = {**deepcopy(DEFAULTS), **deepcopy(supplied)}
     if settings["encoder"] not in ("mlp", "gat"):
         raise ValueError("rl.encoder must be mlp or gat")
+    if settings["shield_mode"] not in ("none", "mask", "contact"):
+        raise ValueError("rl.shield_mode must be none, mask or contact")
     for key in ("hidden_dim", "gat_heads", "gat_layers", "epochs", "minibatch_steps", "updates",
                 "episodes_per_update", "torch_threads", "validation_every", "checkpoint_every"):
         value = settings[key]
@@ -58,6 +61,6 @@ def configure_rl_environment(config, settings):
     configured = deepcopy(config)
     if not settings["use_future"]:
         configured["routing"]["lookahead_slots"] = 0
-    if not settings["use_mask"]:
+    if not settings["use_mask"] or settings["shield_mode"] == "none":
         configured["routing"]["deadline_mask"] = False
     return configured

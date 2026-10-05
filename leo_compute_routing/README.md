@@ -8,9 +8,11 @@
 
 准备跑实验时，按 [完整实验命令与论文完成度](docs/EXPERIMENTS.md) 执行：先做 24 星轨道预实验，再做多初始化主对比、方法消融、规模迁移与参数扫描。
 
-推荐的通信—计算耦合实验配置为 `configs/experiments/walker_coupled.yaml`；另有匹配低负载、计算密集、链路受限和高倾角接触场景。参数依据、已完成的预检查与训练命令见 [SCENARIOS.md](docs/SCENARIOS.md)。
+推荐的新方法配置为 `configs/contact_ppo.yaml`：接触窗口感知候选、预测预约筛选、变规模任务—候选 Graph PPO 和已有局部 KKT 分配。说明、消融和 48→24/72/96 星零样本命令见 [CONTACT_METHOD.md](docs/CONTACT_METHOD.md)。特征 schema 已升级为 2，旧检查点需要重新训练。
 
-项目环境已安装 PyTorch 2.7.1+cu126，RTX 4060 CUDA 验证成功，**72 项测试通过**；已跑通 MLP CPU / GAT GPU 短训练与独立 seed 评估。此前五 seed 的 24 星启发式预实验也已保留。问题复核见 [项目复核](docs/PROJECT_REVIEW.md)，各阶段检查见 [验证记录](docs/VALIDATION.md)。默认轨道配置仍为低负载对照，RL 短训练检查不代表正式论文性能。
+底层通信—计算耦合物理配置为 `configs/experiments/walker_coupled.yaml`；另有匹配低负载、计算密集、链路受限和高倾角接触场景。参数依据与历史物理预检查见 [SCENARIOS.md](docs/SCENARIOS.md)。
+
+项目环境已安装 PyTorch 2.7.1+cu126，RTX 4060 CUDA 验证成功，**98 项测试通过**；新 contact 方法完成 GPU 短轨道训练、独立 seed 合成评估和 48→24/72/96 星短窗口冻结评估。此前五 seed 的 24 星启发式预实验也已保留。问题复核见 [项目复核](docs/PROJECT_REVIEW.md)，当前测试与运行记录见 [验证记录](docs/VALIDATION.md)。默认 `base.yaml` 仍为低负载/KSP 对照，短训练检查不代表正式论文性能。
 
 ## 配置环境后先运行
 
@@ -48,10 +50,10 @@ leo_compute_routing/
 │   ├── config.py               配置合并、校验、实验指纹
 │   ├── topology/               Walker 位置、物理连边、拓扑缓存
 │   ├── tasks/                  不可变 Task、独立随机流、任务回放
-│   ├── network/                链路公式、K 条简单路径、未来接触检查
+│   ├── network/                链路公式、K 条简单路径、滚动接触窗口与容量积分
 │   ├── compute/                已到达 CPU 的剩余工作量及在途工作量
 │   ├── resource/               链路/CPU 闭式分配与等分分配
-│   ├── routing/                统一动作、候选构建、显式 fallback
+│   ├── routing/                接触候选搜索、时间预约日历、统一动作与 fallback
 │   ├── env/                    事件推进、观测、reward、统计
 │   ├── baselines/              七种策略，包含批次虚拟预约
 │   ├── models/                 MLP/GAT 编码、task/path 编码、候选评分、critic

@@ -1,5 +1,7 @@
 # 模型约定与后续算法接口
 
+当前推荐方法与代码接口见 [CONTACT_METHOD.md](CONTACT_METHOD.md)。`configs/contact_ppo.yaml` 启用任务大小/接触窗口候选和时间预约筛选；下文 KSP 规则描述保留的原模式。
+
 ## 时序
 
 在时隙 `t` 边界：先结算此前区间的事件，再观察 `G(t)`、现存任务、CPU 剩余工作量，并读取该边界新到达的任务。
@@ -33,6 +35,8 @@ tx 且当前链路丢失：route_failed
 参考传输速率为最大容量的 `reference_rate_fraction` 倍。未来检查考虑所覆盖快照内的最小容量，检查整个发送区间；不会读取未来新任务。`lookahead_slots=H` 时，最多读当前及后 H 个快照；H=0 禁用未来检查。
 
 CPU 工作量估计采用 `(当前 CPU 剩余 cycles + 已承诺在途 cycles) / F`。它是拥塞代理，不是服务纪律下的严格等待时间。RL 与批次贪心另在策略层逐次加入已选择任务的 CPU/链路预约；原独立决策启发式仍只使用初始快照。
+
+`candidate_generation=contact` 使用滚动窗口中的连续可用区间，按实际任务 bits 积分参考速率，搜索当前图的有界无环路径。该模式达到扩展预算会记录截断标志，而不是声称搜索完整。策略的 `shield_mode=contact` 重建有时间区间的链路/CPU 预测日历，先加入当前活动任务再更新批次前缀；不等待已断链路重新开启，也不改变执行器资源分配。
 
 ## 统一接口
 
@@ -71,9 +75,11 @@ print(info["episode_metrics"])
 | `node_features` | `[Q/F, F/mean(F), inflight/F, x/r, y/r, z/r]`，shape `[S,6]` |
 | `edge_index` | 双向展开的图边索引，shape `[2,2E]` |
 | `edge_features` | `[归一化距离, 归一化容量, 活动剩余 bits/R, 窗口可用比例]` |
-| `task_features` | `[D/Dmax, C/Cmax, deadline_s, 归一化 source_id]` |
-| `candidate_features[task_id]` | `[归一化 hops, route_s, workload_s, execution_s, margin_s, 归一化 bottleneck, fully_checked, topology_feasible]` |
+| `task_features` | `[D/Dmax, C/Cmax, deadline_s, total_cycles/mean(F)]`，不包含数值 ID |
+| `candidate_features[task_id]` | 原 8 维，加接触时长余量与容量余量，共 10 维；PPO 再添加 8 维预约/日历特征 |
 | `active_jobs` | 阶段、路径、hop、剩余 bits/cycles、原始工作量、传播剩余时间、deadline 剩余时间与报告状态 |
+| `contact_plan` | 当前允许的快照副本、连续窗口和容量；不含窗口之外轨道或未来任务 |
+| `reference_rate_fraction`, `allow_unverified_future` | 日历参考速率与预测覆盖不足时的许可规则 |
 
 时间特征仍以秒表示。后续训练可以加入固定量级标准化或保存运行统计，不应对每个算法使用不同尺度。empty batch 的任务特征 shape 为 `[0,4]`；无链路时边特征 shape 为 `[0,4]`。
 

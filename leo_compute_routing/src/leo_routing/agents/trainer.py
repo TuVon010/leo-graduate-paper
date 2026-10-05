@@ -15,6 +15,8 @@ from ..topology.topology_cache import generate_topology
 from ..utils.io import save_csv, save_json, save_yaml
 from .ppo_agent import PPOAgent
 from .rollout_buffer import RolloutBuffer, Transition
+from .diagnostics import add_counts, decision_metrics
+from .features import FEATURE_SCHEMA
 
 
 def train_ppo(config, output_directory, resume=None, progress=None):
@@ -40,6 +42,9 @@ def train_ppo(config, output_directory, resume=None, progress=None):
     output.mkdir(parents=True, exist_ok=True)
     save_yaml(output / "resolved_config.yaml", config)
     save_json(output / "training_manifest.json", {"schema": 1, "config_sha256": fingerprint(config),
+              "feature_schema": FEATURE_SCHEMA,
+              "candidate_generation": configured["routing"].get("candidate_generation", "ksp"),
+              "shield_mode": settings["shield_mode"], "reservation_is_guarantee": False,
               "torch": str(torch.__version__), "numpy": np.__version__, "python": platform.python_version(),
               "device": str(agent.device), "cuda_runtime": torch.version.cuda,
               "gpu": torch.cuda.get_device_name(agent.device) if agent.device.type == "cuda" else None,
@@ -76,8 +81,10 @@ def train_ppo(config, output_directory, resume=None, progress=None):
             environment = LeoEnv(episode_config, topology)
             observation, _ = environment.reset()
             fallback_count, choices = 0, 0
+            diagnostics = {}
             while True:
                 actions, batch, log_probability, value = agent.choose_action(observation)
+                add_counts(diagnostics, agent.last_decision_metrics)
                 next_observation, reward, terminated, truncated, info = environment.step(actions)
                 terminal = terminated or truncated
                 # Next value is only needed at rollout cutoffs; full episodes
@@ -94,7 +101,8 @@ def train_ppo(config, output_directory, resume=None, progress=None):
                 observation = next_observation
             episode_count += 1
             episodes.append({"episode": episode_count, "update": next_update, "seed": seed,
-                             "fallback_count": fallback_count, "decision_count": choices, **info["episode_metrics"]})
+                             "fallback_count": fallback_count, "decision_count": choices, **info["episode_metrics"],
+                             **decision_metrics(diagnostics)})
             if progress:
                 progress("Episode %s seed=%s reward=%.4f success=%.3f" %
                          (episode_count, seed, info["episode_metrics"]["total_reward"], info["episode_metrics"]["success_rate"]))

@@ -89,13 +89,15 @@ $$
 \operatorname{dist}_{\mathcal G[n]}(s_u,s)\le H_{\rm c}\right\}.
 $$
 
-For each remote destination, at most $K$ loop-free paths of at most $H_{\rm p}$ hops are retained. Paths are ranked using the reference communication cost
+For each remote destination, at most $K$ loop-free paths of at most $H_{\rm p}$ hops are retained. The legacy KSP configuration ranks paths using the reference communication cost
 
 $$
 \ell_e[n]=\frac{D_{\rm ref}}{R_e[n]}+\frac{d_e[n]}{c_0},
 $$
 
 where $D_{\rm ref}$ is a fixed reference input size, $R_e[n]$ is link capacity in bits per second, and $c_0$ is the speed of light. This ranking constructs a bounded candidate set; it does not enumerate every route optimal for every task size or congestion state.
+
+The proposed contact-aware configuration instead uses task-specific data size and rolling contact windows. Bounded search enumerates current-graph paths, prioritizes paths without predicted contact loss, and ranks retained paths by estimated communication plus committed-workload and computing time. Each destination retains at most $K$ paths. Budget exhaustion is recorded explicitly, so the candidate set is not claimed to contain the global optimum. Section G specifies the contact and reservation predictions.
 
 Let $\mathcal C_u[n]$ denote the resulting destination-path candidates. Candidate $c$ contains a computing satellite $s(c)$ and a path $\pi(c)=(s_u,\ldots,s(c))$. The local candidate is $(s_u,(s_u))$ and has zero communication hops. The binary selection variable $x_{u,c}$ satisfies
 
@@ -247,7 +249,9 @@ where $\mathcal U_{\rm cmp}\subseteq\mathcal U_{\rm eval}$. Mean completion dela
 
 When a warmup period is used, the arrival cohort is restricted to the common admission window after warmup, and those tasks are followed through the drain period. Resource utilization is measured over the same fixed admission window for every policy.
 
-## G. Short-Term Route Prediction and Batch Competition
+## G. Contact-Window Prediction and Batch Competition
+
+### G.1 Legacy prediction and workload proxies
 
 At slot $n$, the controller can inspect the current snapshot and up to $H$ future snapshots. For $H>0$, the prediction cache covers intervals up to
 
@@ -307,7 +311,44 @@ m_{u,c}=\phi_{u,c}\,
 \mathbf 1\{\widehat T_{u,c}\le\tau_u\}.
 $$
 
-The default setting allows unverified intervals and records their coverage status. For $H=0$, the future-coverage condition is omitted. Deadline filtering and predictive masking can be disabled separately for controlled comparisons. If every candidate is masked, the local candidate is restored as an explicit fallback. A fallback does not imply that the task can meet its deadline. Likewise, an eligible route may still fail or finish late because realized resource sharing differs from the reference prediction.
+The legacy configuration allows unverified intervals and records their coverage status. For $H=0$, the future-coverage condition is omitted. Deadline filtering and predictive masking can be disabled separately for controlled comparisons. If every candidate is masked, the local candidate is restored as an explicit fallback. A fallback does not imply that the task can meet its deadline. Likewise, an eligible route may still fail or finish late because realized resource sharing differs from the reference prediction.
+
+### G.2 Contact windows and temporal reservation screening
+
+In the proposed configuration, consecutive selected-link snapshots form a contact window $w=(e,a_w,b_w,V_w)$ within the visible prediction horizon, where
+
+$$
+V_w=\int_{a_w}^{b_w}R_e(t)\,dt.
+$$
+
+Windows are half-open. A window touching the prediction boundary has an unverified ending, rather than a known physical closing time. Only the configured snapshots are inspected; future task arrivals are never used. The plan follows the contact-plan idea of [CGR](https://ntrs.nasa.gov/citations/20120006508), but no waiting for a disconnected link to reopen is permitted here.
+
+Let $\mathcal R_e$ be the prediction calendar of occupied reference-service intervals on undirected link $e$. For input arrival time $\widehat a_{u,e}$, the predicted last-bit departure is the earliest time satisfying
+
+$$
+\widehat b_{u,e}=\inf\left\{t\ge\widehat a_{u,e}:\int_{\widehat a_{u,e}}^t
+\eta_R R_e(z)\mathbf 1\{z\notin\mathcal R_e\}\,dz\ge D_u\right\},
+$$
+
+subject to continuous contact availability over $[\widehat a_{u,e},\widehat b_{u,e})$. Busy-reference-service intervals can delay transmission, but a known contact gap cannot be bridged. Snapshot-dependent rates are integrated directly. The next hop starts after departure plus propagation, and propagation does not require continued contact. An uncovered tail is extrapolated using the last visible rate and marked unverified; the recommended configuration excludes such remote candidates when future checking is enabled.
+
+For computing satellite $s(c)$, let $\mathcal R_s^{\rm cpu}$ be its prediction service calendar. CPU service starts at the first free interval after the complete input arrives:
+
+$$
+\widehat a_{u,s}^{\rm cpu}=\inf\left\{t\ge\widehat t_{u}^{\rm input}:\left[t,t+W_u/F_s\right)\cap\mathcal R_s^{\rm cpu}=\varnothing\right\},
+\qquad
+\widehat T_{u,c}^{\rm cal}=\widehat a_{u,s}^{\rm cpu}+W_u/F_s-t_u.
+$$
+
+The calendar is initialized from observed residual CPU work and predicted remaining stages of currently transmitting or propagating tasks. Residual bits are used for an ongoing hop, full input size for later hops, and CPU work is booked only after input arrival. CPU-resident work is not counted again as in-flight work. Earlier batch selections then update both calendars before screening the next task.
+
+The contact shield applies the eligibility expression above using calendar-based contact and coverage indicators and $\widehat T_{u,c}^{\rm cal}$ in place of the workload-only proxy. It adds contact-duration and capacity margins to candidate features. The legacy mask and an unmasked policy remain available as controlled alternatives. All-ineligible local fallback is reported separately.
+
+These calendars allocate exclusive reference-service intervals for prediction; the execution engine still uses the fluid processor-sharing rules of Section E. Unknown arrivals and realized sharing can invalidate the prediction. Consequently, the shield is a predictive feasibility mechanism, not a formal safety or deadline guarantee.
+
+### G.3 Variable-size task--candidate policy
+
+The policy applies shared node encoders and shared task--candidate scoring to each candidate, with permutation-invariant mean/max graph pooling. Node identifiers index graph entries but are not learned numerical features. Count summaries are normalized using current constellation size and a fixed per-node training scale; task-size scales remain frozen from training. The same parameter tensors can score different satellite and candidate counts. Both candidate MLP-PPO and GAT-PPO have this structural capability; graph-encoding gains and zero-shot transfer must be established experimentally. Candidate-generation tie-breaking and argmax ties can still affect end-to-end numbering invariance.
 
 ## H. Delay-and-Reliability Objective and Problem Formulation
 
@@ -383,11 +424,13 @@ subject to the candidate, causality, and execution constraints of (P1). This res
 | --- | --- | --- |
 | 圆轨道、ECI 坐标、动态选边 | `topology/walker.py`、`topology/graph_builder.py` | 理想化 Walker 场景，不称为真实 TLE/SGP4 轨道验证 |
 | 批量任务、热点混合分布 | `tasks/task_generator.py` | 热点概率是混合权重，热点实际占比还含全网均匀抽样贡献 |
-| 计算目标与完整路径候选 | `routing/candidate_builder.py`、`network/ksp.py` | 整任务卸载，参考大小用于路径排序，候选集有跳数和数量上限 |
+| 计算目标与完整路径候选 | `routing/candidate_builder.py`、`routing/contact_search.py` | KSP 用参考大小；contact 用实际大小和窗口；均有跳数/数量/搜索预算上限 |
 | 存储转发、传播、CPU 服务、断链失败 | `env/event_engine.py` | 传播不占发送容量；数据完整到达后才能进入 CPU |
 | CPU 与链路平方根分配 | `resource/cpu_allocator.py`、`resource/link_allocator.py` | 原始 workload 决定权重；固定活动集合的静态代理解，不是动态全局最优 |
 | CPU 剩余量与在途承诺量 | `compute/compute_queue.py`、`env/state_builder.py` | $Q/F$ 仅用于估计，不能叠加到仿真完成时延 |
-| 未来发送区间检查 | `network/feasibility.py` | `H=0` 禁用未来检查；默认允许覆盖不足的候选，但不能称其已获保证 |
+| 未来发送区间检查 | `network/feasibility.py`、`network/contact_plan.py` | H=0 禁用未来检查；推荐 contact 配置排除覆盖不足的远程候选，不跨断链等待 |
+| 链路与 CPU 时间预约、接触筛选 | `routing/reservations.py`、`agents/features.py` | 预测日历不是实际执行预留，不认证未知竞争下的成功 |
+| 变规模评分与冻结评估 | `models/candidate_scorer.py`、`evaluation/generalization.py` | 权重和训练尺度冻结；评分等变不等于整个搜索过程编号无关 |
 | 批次预约、增强代价、mask 与本地回退 | `agents/features.py`、`agents/ppo_agent.py` | 预约是策略内部代理量，不是执行器的物理预留；回退可能仍然超期 |
 | 持有成本、一次性违约/失败惩罚 | `env/reward.py` | 默认违约后继续服务；reward 不是仅对已完成任务取平均时延 |
 | 完成时延、成功率、censor 与固定窗口 | `env/metrics.py`、`evaluation/` | 完成时延是条件统计，必须同时报告失败和截尾情况 |
@@ -398,4 +441,6 @@ subject to the candidate, causality, and execution constraints of (P1). This res
 
 若后续希望声称“直接优化平均完成时延”“严格满足 deadline”或“全局联合优化资源”，需要先改变目标或约束并同步修改实现。现版本更准确的描述是：在统一结构化资源分配下，学习目的计算节点与路由的联合选择，以降低折扣后的任务持有成本及违约、断链惩罚。该目标本身不保证提出的方法优于所有基线，性能结论仍需正式多 seed 实验支持。
 
-上述三个外部链接分别用于计算感知路由背景、GAT 和 PPO 的来源说明。具体公式、假设、预测窗口和代价函数以本项目实现为准；论文正式排版时可将链接替换为 BibTeX 引用。
+新推荐配置 `configs/contact_ppo.yaml` 采用 24 星、CPU 40–100 Gcycles/s、任务业务 ISL 200 Mbit/s、输入 20–60 Mbit、每时隙期望 4 个任务、期限 2–8 s、H=16、600 s 到达阶段，并禁止通过未完整覆盖的远程预测。跨规模配置按每星到达率与热点比例缩放；它们是工程假设，不是实测硬件校准。完整参数、消融命令与特征 schema=2 的迁移边界见 [CONTACT_METHOD.md](CONTACT_METHOD.md)。
+
+外部链接用于计算感知路由、CGR、GAT 和 PPO 的来源说明。具体公式、假设、预测窗口和代价函数以本项目实现为准；论文正式排版时可将链接替换为 BibTeX 引用。

@@ -27,7 +27,9 @@ def save_csv(path, rows):
         path.write_text("", encoding="utf-8")
         return
     with path.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        # Learned policies carry shield diagnostics; baseline rows leave them blank.
+        fields = list(dict.fromkeys(key for row in rows for key in row))
+        writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         for row in rows:
             serialized = {k: json.dumps(v) if isinstance(v, (list, dict, tuple)) else v for k, v in row.items()}

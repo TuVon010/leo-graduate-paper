@@ -49,6 +49,9 @@ class Observation:
     candidate_features: object
     active_jobs: tuple
     deadline_mask_enabled: bool
+    contact_plan: object
+    reference_rate_fraction: float
+    allow_unverified_future: bool
 
 
 def build_observation(engine, tasks, slot, candidate_builder, config):
@@ -79,7 +82,7 @@ def build_observation(engine, tasks, slot, candidate_builder, config):
         edges.extend((features, features))
     task_features = [(task.data_bits / config["tasks"]["data_bits"][1],
                       task.cycles_per_bit / config["tasks"]["cycles_per_bit"][1],
-                      task.deadline_seconds, task.source_sat / max(1, trace.satellite_count - 1)) for task in tasks]
+                      task.deadline_seconds, task.total_cycles / capacities.mean()) for task in tasks]
     candidate_features = {}
     for task_id, items in candidates.items():
         features = np.asarray([candidate.features() for candidate in items])
@@ -98,4 +101,6 @@ def build_observation(engine, tasks, slot, candidate_builder, config):
                        readonly(np.asarray(edge_index, dtype=int).reshape(-1, 2).T, int),
                        readonly(np.asarray(edges).reshape(-1, 4)),
                        readonly(np.asarray(task_features).reshape(-1, 4)),
-                       MappingProxyType(candidate_features), active_jobs, config["routing"]["deadline_mask"])
+                       MappingProxyType(candidate_features), active_jobs, config["routing"]["deadline_mask"],
+                       candidate_builder.contact_plan(slot), config["routing"]["reference_rate_fraction"],
+                       config["routing"]["allow_unverified_future"])

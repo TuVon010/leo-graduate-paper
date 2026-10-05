@@ -1,5 +1,7 @@
 # 实验命令与论文完成度
 
+**方法升级（2026-10-05）：** 接触窗口候选、预约日历 Shield 与跨规模冻结评估已经实现；最新方法命令和消融见 [CONTACT_METHOD.md](CONTACT_METHOD.md)。新推荐入口为 `configs/contact_ppo.yaml` 和 `configs/experiments/contact48_ppo.yaml`；旧 schema-1 检查点不能在当前网络加载，需要重新训练。下文通用实验流程仍有效，但低负载/KSP 配置与历史结果不能当作升级方法的正式数据。
+
 当前代码可以开展正式实验，但已保留的 RL 数据主要是 2-update 合成场景功能检查，尚不足以支持“已收敛”“提出的方法优于基线”或“未来预测在轨道场景有效”的论文结论。可以开始撰写系统模型和方法，实验结论需要下面的训练、对比与消融结果。
 
 **场景更新：** 已新增通信—计算耦合、计算密集、链路受限与高倾角接触配置，参数依据、预检查和对应训练命令见 [SCENARIOS.md](SCENARIOS.md)。下文的 `base.yaml` / `ppo.yaml` 命令仍对应原低负载场景；采用新主场景时，改用 `configs/experiments/walker_coupled.yaml`，并在该场景重新训练全部学习方法。

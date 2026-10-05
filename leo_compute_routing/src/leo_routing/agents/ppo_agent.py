@@ -9,6 +9,8 @@ from torch.nn import functional as F
 from ..models.actor_critic import ActorCritic
 from ..config import fingerprint
 from .features import BatchInput, FeatureBuilder, FEATURE_SCHEMA
+from ..routing.reservations import ReservationCalendar
+from torch.distributions import Categorical
 from .settings import rl_settings, configure_rl_environment
 
 
@@ -37,10 +39,15 @@ class PPOAgent:
         self.name = self.settings["encoder"] + "_ppo"
         self.metadata = {"torch": str(torch.__version__), "encoder": self.settings["encoder"],
                          "training_config_sha256": fingerprint(config), "use_future": self.use_future,
-                         "use_mask": self.settings["use_mask"], "use_reservations": self.settings["use_reservations"]}
+                         "use_mask": self.settings["use_mask"], "use_reservations": self.settings["use_reservations"],
+                         "shield_mode": self.settings["shield_mode"], "feature_schema": FEATURE_SCHEMA,
+                         "candidate_generation": config["routing"].get("candidate_generation", "ksp"),
+                         "reservation_is_guarantee": False}
 
     def configure_environment(self, config):
-        return configure_rl_environment(config, self.settings)
+        configured = configure_rl_environment(config, self.settings)
+        configured["routing"]["candidate_generation"] = self.config["routing"].get("candidate_generation", "ksp")
+        return configured
 
     @torch.no_grad()
     def choose_action(self, observation, deterministic=False):
@@ -51,16 +58,32 @@ class PPOAgent:
         decisions, chosen, actions = [], [], {}
         reserved_cpu = np.zeros_like(observation.cpu_capacities)
         reserved_links = {}
+        calendar = ReservationCalendar.from_observation(observation)
+        diagnostics = {"decision_count": 0, "predicted_invalid_selection_count": 0,
+                       "fallback_count": 0, "candidate_count": 0, "predicted_invalid_candidate_count": 0,
+                       "masked_candidate_count": 0, "blocked_probability_mass_sum": 0.0,
+                       "search_truncated_task_count": 0}
         for position, task in enumerate(sorted(observation.tasks, key=lambda t: (t.deadline_seconds, t.task_id))):
-            decision = self.features.decision_input(observation, task, position, reserved_cpu, reserved_links)
-            distribution = self.model.distribution(encoded, decision)
+            decision = self.features.decision_input(observation, task, position, reserved_cpu, reserved_links, calendar)
+            logits = self.model.logits(encoded, decision)
+            allowed = self.model.tensor(decision.mask, torch.bool)
+            distribution = Categorical(logits=logits.masked_fill(~allowed, -torch.inf))
             choice = torch.argmax(distribution.logits) if deterministic else distribution.sample()
             index = int(choice.item())
             actions[task.task_id] = index
             log_probability += distribution.log_prob(choice)
             decisions.append(decision)
             chosen.append(index)
-            self.features.book(observation.candidates[task.task_id][index].action, task, reserved_cpu, reserved_links)
+            self.features.book(observation.candidates[task.task_id][index].action, task, reserved_cpu, reserved_links, calendar)
+            diagnostics["decision_count"] += 1
+            diagnostics["predicted_invalid_selection_count"] += int(not decision.predicted_feasible[index])
+            diagnostics["fallback_count"] += int(decision.fallback)
+            diagnostics["candidate_count"] += len(decision.mask)
+            diagnostics["predicted_invalid_candidate_count"] += int((~decision.predicted_feasible).sum())
+            diagnostics["masked_candidate_count"] += int((~decision.mask).sum())
+            diagnostics["blocked_probability_mass_sum"] += float(torch.softmax(logits, -1)[~allowed].sum())
+            diagnostics["search_truncated_task_count"] += int(any(c.search_truncated for c in observation.candidates[task.task_id]))
+        self.last_decision_metrics = diagnostics
         return actions, BatchInput(state, tuple(decisions), tuple(chosen)), float(log_probability.item()), float(encoded[2].item())
 
     def select(self, observation):
@@ -158,7 +181,8 @@ class PPOAgent:
         # Only tensors and primitive containers are saved: no pickled model/environment objects.
         payload = torch.load(path, map_location="cpu", weights_only=True)
         if payload.get("checkpoint_schema") != 1 or payload.get("feature_schema") != FEATURE_SCHEMA:
-            raise ValueError("Unsupported checkpoint or feature schema")
+            raise ValueError("Unsupported checkpoint or feature schema; schema-1 checkpoints require the old code. "
+                             "Retrain for contact features and schema-2 normalization.")
         agent = cls(payload["config"], device)
         agent.model.load_state_dict(payload["model"])
         agent.update_count = payload["update_count"]

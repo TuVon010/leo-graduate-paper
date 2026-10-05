@@ -14,7 +14,9 @@ from .evaluator import run_comparison
 
 METRICS = ("success_rate", "mean_completion_delay_s", "p95_completion_delay_s",
            "completion_rate", "deadline_violation_rate", "route_failure_rate", "censored_rate",
-           "cpu_utilization", "link_utilization", "mean_queue_cycles")
+           "cpu_utilization", "link_utilization", "mean_queue_cycles", "mean_cost_per_admitted_task_s",
+           "predicted_invalid_action_rate", "fallback_rate", "shield_excluded_fraction",
+           "shield_blocked_probability_mass", "candidate_search_truncated_rate")
 
 
 def bootstrap_interval(values, bootstrap_samples=5000, bootstrap_seed=7301):
@@ -52,14 +54,14 @@ def aggregate_seed_results(rows, reference, bootstrap_samples=5000, bootstrap_se
     summaries, paired = [], []
     for algorithm, group in grouped.items():
         for metric in METRICS:
-            values = [group[seed][metric] for seed in seeds]
+            values = [group[seed].get(metric) for seed in seeds]
             mean, low, high = bootstrap_interval(values, bootstrap_samples, bootstrap_seed)
             valid = int(sum(value is not None and np.isfinite(value) for value in values))
             summaries.append({"algorithm": algorithm, "metric": metric, "seed_count": len(seeds),
                               "valid_seed_count": valid, "mean": mean, "ci95_low": low, "ci95_high": high})
             if algorithm == reference:
                 continue
-            differences = [None if group[s][metric] is None or grouped[reference][s][metric] is None
+            differences = [None if group[s].get(metric) is None or grouped[reference][s].get(metric) is None
                            else group[s][metric] - grouped[reference][s][metric] for s in seeds]
             mean, low, high = bootstrap_interval(differences, bootstrap_samples, bootstrap_seed)
             paired.append({"algorithm": algorithm, "reference": reference, "metric": metric,
