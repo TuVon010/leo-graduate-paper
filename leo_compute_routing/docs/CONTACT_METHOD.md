@@ -2,6 +2,8 @@
 
 2026-10-05 的代码升级说明。推荐配置是 `configs/contact_ppo.yaml`，训练环境不需要新增依赖。
 
+2026-10-06：服务器 20 updates 尚未证明收敛或超过批次贪心，详见 [结果复核与下一轮命令](PILOT_ANALYSIS_20261006.md)。新增 tuned 配置包含价值尺度归一化和可选预计完成时间先验，策略为“先验＋GAT/MLP 学习残差”；`contact_greedy` 用相同候选、Shield、预约且不学习，作为先验贡献对照。原配置默认尺度 1、先验强度 0，旧检查点仍可读取。两版策略须分别标注，新版需重新训练。
+
 Linux 单初始化预实验按 [SERVER_EXPERIMENTS.md](SERVER_EXPERIMENTS.md) 执行：初始化 2026、独立测试 seed 201。下文 PowerShell 多 seed 示例供后续扩展；单 seed 评估已支持，CI 留空。
 
 ## 1. “接触窗口感知候选”是什么

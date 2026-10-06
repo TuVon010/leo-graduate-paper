@@ -13,3 +13,6 @@ __pycache__/
 # 构建产物
 build/
 dist/
+
+# 临时工作目录
+tmp/

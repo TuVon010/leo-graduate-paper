@@ -5,6 +5,8 @@ DEFAULTS = {
     "encoder": "gat", "hidden_dim": 64, "gat_heads": 4, "gat_layers": 2,
     "use_future": True, "use_mask": True, "use_reservations": True, "time_scale_seconds": 1.0,
     "shield_mode": "mask",
+    # Defaults retain the behavior of downloaded schema-2 checkpoints.
+    "value_scale": 1.0, "completion_prior_strength": 0.0,
     "learning_rate": 3e-4, "gamma": 0.995, "gae_lambda": 0.95, "clip_ratio": 0.2,
     "value_coefficient": 0.5, "entropy_coefficient": 0.01, "max_grad_norm": 0.5,
     "epochs": 4, "minibatch_steps": 16, "target_kl": 0.03,
@@ -36,7 +38,7 @@ def rl_settings(config):
         if not isinstance(settings[key], bool):
             raise ValueError("rl.%s must be boolean" % key)
     for key in ("time_scale_seconds", "learning_rate", "gamma", "gae_lambda", "clip_ratio",
-                "value_coefficient", "max_grad_norm", "target_kl"):
+                "value_coefficient", "max_grad_norm", "target_kl", "value_scale"):
         value = settings[key]
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError("rl.%s must be positive and finite" % key)
@@ -45,6 +47,9 @@ def rl_settings(config):
     entropy = settings["entropy_coefficient"]
     if isinstance(entropy, bool) or not isinstance(entropy, (int, float)) or not math.isfinite(entropy) or entropy < 0:
         raise ValueError("Invalid entropy_coefficient")
+    prior = settings["completion_prior_strength"]
+    if isinstance(prior, bool) or not isinstance(prior, (int, float)) or not math.isfinite(prior) or prior < 0:
+        raise ValueError("completion_prior_strength must be nonnegative and finite")
     for key in ("train_seeds", "validation_seeds"):
         values = settings[key]
         if not isinstance(values, list) or not values or len(set(values)) != len(values) or any(

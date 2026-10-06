@@ -20,8 +20,10 @@ def contact_config(tiny_config, encoder="gat"):
 
 
 @pytest.mark.parametrize("encoder", ["mlp", "gat"])
-def test_whole_policy_is_equivariant_under_node_and_candidate_relabeling(tiny_config, encoder):
+@pytest.mark.parametrize("prior", [0.0, 2.0])
+def test_whole_policy_is_equivariant_under_node_and_candidate_relabeling(tiny_config, encoder, prior):
     config = contact_config(tiny_config, encoder)
+    config["rl"]["completion_prior_strength"] = prior
     env = LeoEnv(config, task_trace=((Task(0, 0, 10, 1, 10, 0),), (), ()))
     observation, _ = env.reset()
     agent = PPOAgent(config)

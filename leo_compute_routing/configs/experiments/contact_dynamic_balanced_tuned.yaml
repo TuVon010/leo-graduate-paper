@@ -1,0 +1,8 @@
+extends: contact_dynamic_tuned.yaml
+# Optional load sensitivity point, specified independently of policy ranking.
+# 18/11 times the original demand; global CPU offered load should remain < 1.
+# Hotspot local overload is intentional and must be reported in calibration.
+tasks:
+  arrival_rate_per_slot: 18.0
+reward:
+  normalizer: 18.0

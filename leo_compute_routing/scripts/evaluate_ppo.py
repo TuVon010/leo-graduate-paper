@@ -1,4 +1,4 @@
-"""Compare frozen MLP/GAT checkpoints and existing baselines on held-out seeds."""
+"""Compare frozen checkpoints; optionally label reused validation seeds as development evaluation."""
 import argparse
 import math
 from datetime import datetime
@@ -18,6 +18,8 @@ def main():
     parser.add_argument("--algorithms", nargs="*", choices=POLICY_NAMES,
                         default=["local", "shortest_offload", "least_load", "computing_aware", "computing_aware_future"])
     parser.add_argument("--device", default="cpu")
+    parser.add_argument("--allow-validation-reuse", action="store_true",
+                        help="Allow validation seeds for debugging; output is NOT an independent test")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--bootstrap-samples", type=int, default=5000)
     parser.add_argument("--log-interval-seconds", type=float, default=10.0)
@@ -36,7 +38,8 @@ def main():
         evaluate_checkpoints(args.checkpoints, args.seeds, output, args.algorithms,
                              load_config(args.config) if args.config else None, args.device,
                              args.bootstrap_samples, progress=lambda s: print(s, flush=True),
-                             log_interval_seconds=args.log_interval_seconds)
+                             log_interval_seconds=args.log_interval_seconds,
+                             allow_validation_reuse=args.allow_validation_reuse)
         print("[EVAL COMPLETE] results=%s | console_log=%s" % (output.resolve(), log), flush=True)
 
 

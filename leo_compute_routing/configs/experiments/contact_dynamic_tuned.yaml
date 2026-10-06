@@ -1,0 +1,12 @@
+extends: contact_dynamic_ppo.yaml
+# Same physics as contact66; the same learning settings apply to MLP and GAT.
+rl:
+  seed: 2026
+  train_seeds: [2026]
+  validation_seeds: [100]
+  value_scale: 100.0
+  completion_prior_strength: 2.0
+  learning_rate: 0.0001
+  entropy_coefficient: 0.002
+  minibatch_steps: 64
+  validation_every: 5

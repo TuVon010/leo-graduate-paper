@@ -25,6 +25,9 @@ CASES = {
     "compute24": "configs/experiments/contact_compute_heavy_ppo.yaml",
     "link24": "configs/experiments/contact_link_heavy_ppo.yaml",
     "contact66": "configs/experiments/contact_dynamic_ppo.yaml",
+    "compute24_tuned": "configs/experiments/contact_compute_tuned.yaml",
+    "contact66_tuned": "configs/experiments/contact_dynamic_tuned.yaml",
+    "contact66_balanced_tuned": "configs/experiments/contact_dynamic_balanced_tuned.yaml",
     "scale48": "configs/experiments/contact48_ppo.yaml",
     "smoke": "configs/contact_smoke.yaml",
 }
@@ -49,7 +52,7 @@ SUITES = {
     "sensitivity": ["full", "mlp"],
 }
 BASELINES = ["local", "shortest_offload", "least_load", "computing_aware",
-             "computing_aware_future", "batch_greedy", "batch_greedy_future"]
+             "computing_aware_future", "batch_greedy", "batch_greedy_future", "contact_greedy"]
 
 
 def read_json(path):
@@ -177,6 +180,9 @@ def train_case(args, case, variants):
 
 def evaluate_case(args, case, variants, label=None, config=None, algorithms=None, own_config=False):
     label = label or args.suite
+    selected_algorithms = list(args.algorithms if algorithms is None else algorithms)
+    if algorithms is None and case.endswith("_tuned") and "contact_greedy" not in selected_algorithms:
+        selected_algorithms.append("contact_greedy")  # mandatory no-learning control for the new prior
     for initialization in args.initializations:
         checkpoints = [training_path(args.output, case, variant, initialization) / "best.pt" for variant in variants]
         if not args.dry_run and any(not path.exists() for path in checkpoints):
@@ -185,8 +191,10 @@ def evaluate_case(args, case, variants, label=None, config=None, algorithms=None
         command = [sys.executable, "-u", "scripts/evaluate_ppo.py", "--checkpoints", *checkpoints,
                    "--seeds", *args.test_seeds, "--device", args.eval_device, "--output", output,
                    "--bootstrap-samples", "5000", "--algorithms",
-                   *(args.algorithms if algorithms is None else algorithms)]
+                   *selected_algorithms]
         command += ["--log-interval-seconds", args.log_interval_seconds]
+        if args.allow_validation_reuse:
+            command += ["--allow-validation-reuse"]
         if not own_config:
             command += ["--config", config or PROJECT_ROOT / CASES[case]]
         execute(command, args.output, "eval/%s/%s/init_%s" % (label, case, initialization),
@@ -242,8 +250,11 @@ def parse_args():
     parser.add_argument("--phase", choices=["train", "evaluate", "both"], default="both")
     parser.add_argument("--cases", choices=CASES, nargs="+", default=["compute24", "contact66"])
     parser.add_argument("--initializations", type=int, nargs="+", default=[2026])
-    parser.add_argument("--test-seeds", type=int, nargs="+", default=[201])
-    parser.add_argument("--algorithms", choices=BASELINES, nargs="*", default=BASELINES)
+    parser.add_argument("--test-seeds", type=int, nargs="+",
+                        help="Default: seed 100 with labeled validation reuse for tuned cases; 201 for legacy cases")
+    parser.add_argument("--allow-validation-reuse", action="store_true",
+                        help="Use validation seeds for a labeled development comparison")
+    parser.add_argument("--algorithms", choices=BASELINES, nargs="*", default=BASELINES[:-1])
     parser.add_argument("--updates", type=int, default=200)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--eval-device", default="cpu")
@@ -252,6 +263,10 @@ def parse_args():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--log-interval-seconds", type=float, default=10.0)
     args = parser.parse_args()
+    if args.test_seeds is None:
+        tuned = all(case.endswith("_tuned") for case in args.cases)
+        args.test_seeds = [100] if tuned else [201]
+        args.allow_validation_reuse = args.allow_validation_reuse or tuned
     if args.updates < 1 or any(i < 0 for i in args.initializations + args.test_seeds):
         parser.error("Use positive updates and nonnegative seeds")
     if not math.isfinite(args.log_interval_seconds) or args.log_interval_seconds <= 0:
@@ -263,8 +278,12 @@ def parse_args():
         parser.error("Use at least one test seed")
     for case in args.cases:
         config = load_config(PROJECT_ROOT / CASES[case])
-        if set(args.test_seeds) & set(config["rl"]["train_seeds"] + config["rl"]["validation_seeds"]):
-            parser.error("Test seeds overlap training/validation")
+        if set(args.test_seeds) & set(config["rl"]["train_seeds"]):
+            parser.error("Evaluation seeds overlap training seeds")
+        if set(args.test_seeds) & set(config["rl"]["validation_seeds"]) and not args.allow_validation_reuse:
+            parser.error("Evaluation seeds overlap validation; use --allow-validation-reuse for development evaluation")
+    if args.suite == "scale" and args.allow_validation_reuse:
+        parser.error("Validation reuse applies to checkpoint comparisons; scale requires held-out evaluation seeds")
     args.output = args.output.resolve()
     if args.resume_root:
         args.resume_root = args.resume_root.resolve()

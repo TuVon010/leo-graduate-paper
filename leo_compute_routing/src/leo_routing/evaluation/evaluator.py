@@ -65,7 +65,7 @@ def run_comparison(config, algorithms, output_directory, topology_cache=None, ta
     output_directory = Path(output_directory)
     output_directory.mkdir(parents=True, exist_ok=True)
     # Validate policy names before generating expensive traces.
-    policies = [make_policy(name) for name in algorithms] + list(extra_policies or ())
+    policies = [make_policy(name, config) for name in algorithms] + list(extra_policies or ())
     if not policies or len({policy.name for policy in policies}) != len(policies):
         raise ValueError("Comparison requires nonempty, uniquely named policies")
     if progress:

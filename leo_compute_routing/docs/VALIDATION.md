@@ -1,5 +1,16 @@
 # 第一阶段验证记录
 
+## 服务器结果诊断与学习尺度：2026-10-06
+
+后续按用户要求使用单一训练 seed 2026，验证/开发评估统一 100。新增显式 validation reuse 模式，日志和 study manifest 标注非独立测试；回归 **113 passed**，验证复用标签、默认独立检查、训练 seed 隔离及相同物理输入。旧结果及其独立测试记录保留原意。
+
+- 回归 **112 passed**：新增尺度／原 reward 单位一致、旧检查点兼容、先验下等变、零残差与无学习对照一致、共享任务/CPU输入及预约不改变真实资源检查。
+- 原始下载数据 `results/server_pilot_20261005_182146/` 未覆盖；四组训练实际 CUDA/RTX 4070 Ti，只有第 10、20 次验证，未证明收敛和强基线优势。审计与图保存 `results/pilot_analysis_20261006/`。
+- 新配置固定 value_scale=100、completion_prior_strength=2，MLP/GAT 一致；同轨道短诊断 raw/scaled/scaled_prior 各 3 updates 已完成，只读验证 seed 100，结果 `results/learning_diagnostic_20261006/`。数值压力改善；先验模型与 contact_greedy 相近，尚无额外 PPO 收益证明。
+- 新较高负载配置在诊断 seed 50 完成全窗口物理审计：全局期望 rho=0.6054、最大热点本地 rho=2.0417、乐观 CPU 下界先天不可行比例=0。热点过载仍须报告。
+- 新 main/dry-run 命令包含 no-learning contact_greedy；旧 case 默认七基线保持兼容。新参数不能恢复旧 20-updates 检查点；下一轮使用 seed 100 进行开发评估，独立测试另行安排。
+- 详见 [完整诊断报告](PILOT_ANALYSIS_20261006.md)。
+
 ## 控制台与主要指标升级：2026-10-05
 
 - 回归 **103 passed**；新增 stdout/stderr 实时落盘、异常保留、子进程真实实时转发、FPS 时隙计数和无 GPU 自动 CPU 训练/指标检查。

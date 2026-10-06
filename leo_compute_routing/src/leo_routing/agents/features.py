@@ -12,6 +12,7 @@ from ..routing.reservations import ReservationCalendar
 
 FEATURE_SCHEMA = 2
 NODE_DIM, EDGE_DIM, CONTEXT_DIM, TASK_DIM, CANDIDATE_DIM = 8, 4, 12, 5, 18
+CONTACT_COMPLETION_INDEX = 13  # signed log(1 + calendar completion seconds / time_scale)
 
 
 def frozen_array(values, dtype=np.float32):

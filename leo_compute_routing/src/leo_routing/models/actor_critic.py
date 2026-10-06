@@ -3,7 +3,7 @@ import torch
 from torch import nn
 from torch.distributions import Categorical
 
-from ..agents.features import NODE_DIM, EDGE_DIM, CONTEXT_DIM, TASK_DIM, CANDIDATE_DIM
+from ..agents.features import NODE_DIM, EDGE_DIM, CONTEXT_DIM, TASK_DIM, CANDIDATE_DIM, CONTACT_COMPLETION_INDEX
 from .candidate_scorer import CandidateScorer
 from .gat_encoder import GATEncoder
 
@@ -19,6 +19,12 @@ class ActorCritic(nn.Module):
         self.context_encoder = nn.Sequential(nn.Linear(2 * hidden + CONTEXT_DIM, hidden), nn.Tanh())
         self.scorer = CandidateScorer(hidden, TASK_DIM, CANDIDATE_DIM)
         self.value_network = nn.Sequential(nn.Linear(hidden, hidden), nn.Tanh(), nn.Linear(hidden, 1))
+        self.value_scale = settings["value_scale"]
+        self.completion_prior_strength = settings["completion_prior_strength"]
+        if self.value_scale != 1.0:
+            # Start near zero in physical reward units despite the scaled value head.
+            nn.init.orthogonal_(self.value_network[-1].weight, gain=0.01)
+            nn.init.zeros_(self.value_network[-1].bias)
 
     @property
     def device(self):
@@ -34,12 +40,17 @@ class ActorCritic(nn.Module):
                  if self.is_gat else self.graph_encoder(inputs))
         pooled = torch.cat((nodes.mean(0), nodes.max(0).values, self.tensor(state.context)))
         context = self.context_encoder(pooled)
-        return nodes, context, self.value_network(context).squeeze(-1)
+        # Rollout/GAE always use original reward units, including old checkpoints.
+        return nodes, context, self.value_network(context).squeeze(-1) * self.value_scale
 
     def logits(self, encoded, decision):
         nodes, context, _ = encoded
-        return self.scorer(nodes, context, self.tensor(decision.task), self.tensor(decision.candidates),
-                             decision.source, self.tensor(decision.destinations, torch.long), self.tensor(decision.path_pool))
+        candidates = self.tensor(decision.candidates)
+        residual = self.scorer(nodes, context, self.tensor(decision.task), candidates,
+                               decision.source, self.tensor(decision.destinations, torch.long), self.tensor(decision.path_pool))
+        # Transparent physics prior, identical for MLP/GAT. No future task arrivals.
+        # Neural logits can override it; masks and joint PPO ratios stay unchanged.
+        return residual - self.completion_prior_strength * candidates[:, CONTACT_COMPLETION_INDEX]
 
     def distribution(self, encoded, decision):
         logits = self.logits(encoded, decision)

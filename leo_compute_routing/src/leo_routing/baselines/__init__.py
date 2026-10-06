@@ -3,12 +3,15 @@ from .shortest_path import ShortestOffload
 from .least_load import LeastLoad
 from .computing_aware import ComputingAware
 from .batch_greedy import BatchGreedy
+from .contact_greedy import ContactGreedy
 
 POLICY_NAMES = ("local", "shortest_offload", "least_load", "computing_aware", "computing_aware_future",
-                "batch_greedy", "batch_greedy_future")
+                "batch_greedy", "batch_greedy_future", "contact_greedy")
 
 
-def make_policy(name):
+def make_policy(name, config=None):
+    if name == "contact_greedy":
+        return ContactGreedy(config)
     if name == "local":
         return LocalOnly()
     if name == "shortest_offload":

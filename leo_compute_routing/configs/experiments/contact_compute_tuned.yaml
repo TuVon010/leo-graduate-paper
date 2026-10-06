@@ -1,0 +1,12 @@
+extends: contact_compute_heavy_ppo.yaml
+# Same physics as compute24. Retrain: never resume the old 20-update optimizer.
+rl:
+  seed: 2026
+  train_seeds: [2026]
+  validation_seeds: [100]
+  value_scale: 100.0
+  completion_prior_strength: 2.0
+  learning_rate: 0.0001
+  entropy_coefficient: 0.002
+  minibatch_steps: 64
+  validation_every: 5

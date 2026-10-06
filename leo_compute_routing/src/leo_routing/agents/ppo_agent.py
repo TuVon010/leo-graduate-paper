@@ -45,6 +45,8 @@ class PPOAgent:
                          "training_config_sha256": fingerprint(config), "use_future": self.use_future,
                          "use_mask": self.settings["use_mask"], "use_reservations": self.settings["use_reservations"],
                          "shield_mode": self.settings["shield_mode"], "feature_schema": FEATURE_SCHEMA,
+                         "value_scale": self.settings["value_scale"],
+                         "completion_prior_strength": self.settings["completion_prior_strength"],
                          "candidate_generation": config["routing"].get("candidate_generation", "ksp"),
                          "reservation_is_guarantee": False}
 
@@ -143,7 +145,8 @@ class PPOAgent:
                 if bool(valid.any()) and float(approximate_kl.detach()) > self.settings["target_kl"]:
                     early_stop = True
                     break
-                value_loss = F.mse_loss(values, targets)
+                raw_value_loss = F.mse_loss(values, targets)
+                value_loss = raw_value_loss / self.settings["value_scale"] ** 2
                 loss = (policy_loss + self.settings["value_coefficient"] * value_loss -
                         self.settings["entropy_coefficient"] * entropy_bonus)
                 if not bool(torch.isfinite(loss)):
@@ -155,7 +158,8 @@ class PPOAgent:
                 statistics.append({"loss": float(loss.detach()), "policy_loss": float(policy_loss.detach()),
                                    "value_loss": float(value_loss.detach()), "entropy_per_task": float(entropy_bonus.detach()),
                                    "approximate_joint_kl": float(approximate_kl.detach()), "clip_fraction": float(clip_fraction.detach()),
-                                   "gradient_norm": float(gradient_norm)})
+                                   "gradient_norm": float(gradient_norm), "raw_value_loss": float(raw_value_loss.detach()),
+                                   "gradient_clip_scale": min(1.0, self.settings["max_grad_norm"] / max(float(gradient_norm), 1e-12))})
                 now = perf_counter()
                 if progress and now - last_report >= log_interval_seconds:
                     last_report = now
@@ -167,12 +171,16 @@ class PPOAgent:
                 break
         self.update_count += 1
         self.model.eval()
-        keys = ("loss", "policy_loss", "value_loss", "entropy_per_task", "approximate_joint_kl", "clip_fraction", "gradient_norm")
+        keys = ("loss", "policy_loss", "value_loss", "raw_value_loss", "entropy_per_task", "approximate_joint_kl",
+                "clip_fraction", "gradient_norm", "gradient_clip_scale")
         metrics = {key: float(np.mean([row[key] for row in statistics])) if statistics else 0.0 for key in keys}
         predictions = np.asarray([t.value for t in buffer.transitions])
         variance = float(np.var(returns))
         metrics.update({"optimizer_steps": len(statistics), "kl_early_stop": early_stop,
                         "rollout_steps": len(buffer), "policy_steps": int(policy_steps.sum()),
+                        "value_prediction_mean": float(predictions.mean()), "value_prediction_std": float(predictions.std()),
+                        "return_mean": float(returns.mean()), "return_std": float(returns.std()),
+                        "value_scale": self.settings["value_scale"],
                         "explained_variance_before_update": 1 - float(np.var(returns - predictions)) / variance if variance else None})
         return metrics
 
