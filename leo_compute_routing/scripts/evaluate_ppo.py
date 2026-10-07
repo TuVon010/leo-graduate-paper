@@ -14,9 +14,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoints", nargs="+", type=Path, required=True)
     parser.add_argument("--config", type=Path)
-    parser.add_argument("--seeds", nargs="+", type=int, default=[201, 202, 203, 204, 205])
+    parser.add_argument("--seeds", nargs="+", type=int, default=[201])
     parser.add_argument("--algorithms", nargs="*", choices=POLICY_NAMES,
-                        default=["local", "shortest_offload", "least_load", "computing_aware", "computing_aware_future"])
+                        default=["local", "shortest_offload", "least_load", "computing_aware", "computing_aware_future", "node_greedy"])
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--allow-validation-reuse", action="store_true",
                         help="Allow validation seeds for debugging; output is NOT an independent test")

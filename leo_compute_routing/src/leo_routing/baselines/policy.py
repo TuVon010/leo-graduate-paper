@@ -6,5 +6,5 @@ class RoutingPolicy(Protocol):
     use_future: bool
 
     def select(self, observation) -> dict:
-        """Return {task_id: candidate_index}; an empty batch returns {}."""
+        """Return {task_id: RoutingAction}; an empty batch returns {}."""
         ...

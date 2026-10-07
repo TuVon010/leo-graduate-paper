@@ -77,10 +77,11 @@ class EpisodeProgress:
 
 
 def outcome_text(metrics):
-    return ("reward=%s success=%.2f%% delay=%ss P95=%ss ddl=%.2f%% route_fail=%.2f%% censor=%.2f%% "
+    return ("reward=%s success=%.2f%% delay=%ss P95=%ss ddl=%.2f%% route_fail=%.2f%% route_reject=%.2f%% censor=%.2f%% "
             "task_cost=%ss sat_CPU_util=%.2f%% link_util=%.2f%% completed=%s/%s" % (
         metric_text(metrics["total_reward"]), 100 * metrics["success_rate"],
         metric_text(metrics["mean_completion_delay_s"]), metric_text(metrics["p95_completion_delay_s"]),
-        100 * metrics["deadline_violation_rate"], 100 * metrics["route_failure_rate"], 100 * metrics["censored_rate"],
+        100 * metrics["deadline_violation_rate"], 100 * metrics["route_failure_rate"],
+        100 * metrics.get("routing_rejection_rate", 0), 100 * metrics["censored_rate"],
         metric_text(metrics.get("mean_cost_per_admitted_task_s")), 100 * metrics["cpu_utilization"],
         100 * metrics["link_utilization"], metrics["completed_count"], metrics["task_count"]))

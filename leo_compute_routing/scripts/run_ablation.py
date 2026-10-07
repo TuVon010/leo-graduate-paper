@@ -8,7 +8,7 @@ from leo_routing.evaluation.ablation import run_ablation
 
 def main():
     parser = argparse.ArgumentParser(description="Run simulator/heuristic ablations")
-    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs/contact_stress.yaml")
+    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs/smoke.yaml")
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "results/ablation")
     parser.add_argument("--set", action="append", default=[])
     args = parser.parse_args()

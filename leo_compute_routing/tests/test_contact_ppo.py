@@ -14,16 +14,14 @@ from leo_routing.tasks.task import Task
 
 def contact_config(tiny_config, encoder="gat"):
     config = deepcopy(tiny_config)
-    config["routing"].update(candidate_generation="contact", reference_rate_fraction=1.0, lookahead_slots=5)
-    config["rl"] = {"encoder": encoder, "hidden_dim": 16, "device": "cpu", "shield_mode": "contact"}
+    config["routing"].update(reference_rate_fraction=1.0, lookahead_slots=5)
+    config["rl"] = {"encoder": encoder, "hidden_dim": 16, "device": "cpu"}
     return config
 
 
 @pytest.mark.parametrize("encoder", ["mlp", "gat"])
-@pytest.mark.parametrize("prior", [0.0, 2.0])
-def test_whole_policy_is_equivariant_under_node_and_candidate_relabeling(tiny_config, encoder, prior):
+def test_satellite_policy_is_equivariant_under_node_relabeling(tiny_config, encoder):
     config = contact_config(tiny_config, encoder)
-    config["rl"]["completion_prior_strength"] = prior
     env = LeoEnv(config, task_trace=((Task(0, 0, 10, 1, 10, 0),), (), ()))
     observation, _ = env.reset()
     agent = PPOAgent(config)
@@ -31,46 +29,43 @@ def test_whole_policy_is_equivariant_under_node_and_candidate_relabeling(tiny_co
     graph, decision = batch.graph, batch.decisions[0]
     permutation = np.array([3, 0, 5, 2, 1, 4])
     inverse = np.argsort(permutation)
-    candidates = np.arange(len(decision.mask))[::-1]
     changed_graph = replace(graph, nodes=frozen_array(graph.nodes[permutation]),
                             edge_index=frozen_array(inverse[graph.edge_index], np.int64))
     changed_decision = replace(decision, source=int(inverse[decision.source]),
-        destinations=frozen_array(inverse[decision.destinations[candidates]], np.int64),
-        path_pool=frozen_array(decision.path_pool[candidates][:, permutation]),
-        candidates=frozen_array(decision.candidates[candidates]), mask=frozen_array(decision.mask[candidates], bool),
-        predicted_feasible=frozen_array(decision.predicted_feasible[candidates], bool))
+        destination_features=frozen_array(decision.destination_features[permutation]),
+        mask=frozen_array(decision.mask[permutation], bool))
     original = agent.model.encode(graph)
     changed = agent.model.encode(changed_graph)
     assert torch.allclose(original[2], changed[2], atol=1e-6)
     assert torch.allclose(agent.model.logits(changed, changed_decision),
-                          agent.model.logits(original, decision)[torch.tensor(candidates.copy())], atol=1e-6)
+                          agent.model.logits(original, decision)[torch.tensor(permutation.copy())], atol=1e-6)
     assert float(agent.model.evaluate_batch(batch)[0].detach()) == pytest.approx(log, abs=1e-5)
+    assert len(decision.mask) == observation.graph.number_of_nodes()
+    assert not hasattr(decision, "path_pool")
 
 
-def test_contact_shield_rechecks_contact_after_prefix_reservation(tiny_config, trace_factory):
+def test_router_runs_after_node_choice_and_records_rejected_request(tiny_config, trace_factory, monkeypatch):
     config = contact_config(tiny_config)
     trace = trace_factory(satellites=6, slots=24, unavailable_slots=tuple(range(2, 24)))
     jobs = ((Task(0, 0, 150, 1, 10, 0), Task(1, 0, 150, 1, 10, 0)), (), ())
-    capacities = [1, 1000, 1000, 1000, 1000, 1000]
-    contact = LeoEnv(config, trace, jobs, capacities)
-    observation, _ = contact.reset()
+    env = LeoEnv(config, trace, jobs, [1000] * 6)
+    obs, _ = env.reset()
     agent = PPOAgent(config)
-    actions, batch, *_ = agent.choose_action(observation, deterministic=True)
-    assert actions == {0: 1, 1: 0}
-    assert batch.decisions[1].fallback and not batch.decisions[1].predicted_feasible[0]
-    assert agent.last_decision_metrics["predicted_invalid_selection_count"] == 1  # explicit unsafe local fallback
-    static_config = deepcopy(config)
-    static_config["rl"]["shield_mode"] = "mask"
-    static = LeoEnv(static_config, trace, jobs, capacities)
-    obs, _ = static.reset()
-    static_agent = PPOAgent(static_config)
-    static_actions, *_ = static_agent.choose_action(obs, deterministic=True)
-    assert static_actions == {0: 1, 1: 1}
-    contact.step(actions)
-    static.step(static_actions)
-    contact.engine.advance(3)
-    static.engine.advance(3)
-    assert contact.engine.route_failures == 0 and static.engine.route_failures == 2
+    monkeypatch.setattr(agent.model, "logits", lambda encoded, decision:
+                        torch.tensor([0., 20., 0., 0., 0., 0.], device=agent.device))
+    actions, batch, log, _ = agent.choose_action(obs, deterministic=True)
+    assert batch.actions == (1, 1)  # PPO log probabilities concern requested nodes only.
+    assert actions[0].compute_sat == 1 and actions[0].path == (0, 1)
+    assert actions[1].compute_sat == 0 and actions[1].requested_compute_sat == 1
+    assert actions[1].routing_rejection_reason == "no_verified_route"
+    assert agent.last_decision_metrics["router_fallback_count"] == 1
+    assert float(agent.model.evaluate_batch(batch)[0].detach()) == pytest.approx(log, abs=1e-5)
+    env.step(actions)
+    env.engine.advance(3)
+    assert env.engine.route_failures == 0
+    records = env.engine.task_records()
+    assert records[1]["requested_compute_sat"] == 1 and records[1]["compute_sat"] == 0
+    assert env.slot_metrics[0]["new_routing_rejections"] == 1
 
 
 @pytest.mark.parametrize("encoder", ["mlp", "gat"])

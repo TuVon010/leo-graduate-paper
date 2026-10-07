@@ -1,6 +1,0 @@
-extends: walker_contact_dynamic.yaml
-routing:
-  candidate_generation: contact
-  allow_unverified_future: false
-rl:
-  shield_mode: contact

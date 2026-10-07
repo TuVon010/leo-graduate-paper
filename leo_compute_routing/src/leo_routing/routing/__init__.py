@@ -1,1 +1,1 @@
-"""Variable candidate actions and policy-independent estimates."""
+"""Selected computing satellites, time-dependent graph routing and service calendars."""

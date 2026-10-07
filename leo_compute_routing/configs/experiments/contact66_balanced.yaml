@@ -1,0 +1,5 @@
+extends: contact66.yaml
+tasks:
+  arrival_rate_per_slot: 18.0
+reward:
+  normalizer: 18.0

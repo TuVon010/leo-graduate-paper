@@ -1,4 +1,0 @@
-extends: walker_coupled.yaml
-# Computing demand increased by 50% in expectation; communication unchanged.
-tasks:
-  cycles_per_bit: [1000.0, 2000.0]

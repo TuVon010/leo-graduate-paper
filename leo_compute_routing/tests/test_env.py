@@ -89,3 +89,20 @@ def test_future_ablation_preserves_deadline_filtering(tiny_config, tmp_path):
     assert resolved["routing"]["lookahead_slots"] == 0
     assert resolved["routing"]["deadline_mask"] == tiny_config["routing"]["deadline_mask"]
     assert len({row["task_trace_sha256"] for row in rows}) == 1
+
+
+def test_route_rejection_is_penalized_and_not_a_physical_failure(tiny_config):
+    from leo_routing.routing.action_builder import RoutingAction
+    task = Task(0, 0, 10, 1, 3, 0)
+    rewards = []
+    for rejected in (False, True):
+        env = LeoEnv(tiny_config, task_trace=((task,), (), ()))
+        env.reset()
+        action = RoutingAction(0, 0, (0,), 1 if rejected else None,
+                               "no_verified_route" if rejected else "")
+        _, reward, _, _, info = env.step({0: action})
+        rewards.append(reward)
+        assert info["slot_metrics"]["new_route_failures"] == 0
+        assert info["slot_metrics"]["new_routing_rejections"] == int(rejected)
+    assert rewards[0] - rewards[1] == pytest.approx(
+        tiny_config["reward"]["route_failure_penalty"] / tiny_config["reward"]["normalizer"])

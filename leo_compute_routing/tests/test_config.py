@@ -28,3 +28,10 @@ def test_unknown_override_and_cycle_rejected(tmp_path):
     (tmp_path / "b.yaml").write_text("extends: a.yaml", encoding="utf-8")
     with pytest.raises(ValueError):
         load_config(tmp_path / "a.yaml")
+
+
+@pytest.mark.parametrize("key", ["k_paths", "candidate_generation", "path_backend", "reference_data_bits"])
+def test_retired_routing_parameters_are_rejected(tiny_config, key):
+    tiny_config["routing"][key] = 1
+    with pytest.raises(ValueError, match="retired"):
+        validate_config(tiny_config)

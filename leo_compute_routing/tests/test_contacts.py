@@ -5,7 +5,8 @@ import pytest
 
 from leo_routing.network.contact_plan import ContactPlan
 from leo_routing.routing.action_builder import RoutingAction
-from leo_routing.routing.candidate_builder import CandidateBuilder
+from leo_routing.routing.contact_aware_router import ContactAwareRouter
+from leo_routing.env.leo_env import LeoEnv
 from leo_routing.routing.reservations import ReservationCalendar
 from leo_routing.tasks.task import Task
 from leo_routing.topology.topology_cache import TopologyTrace
@@ -52,20 +53,23 @@ def test_unknown_tail_never_reads_beyond_horizon(trace_factory):
     assert not calendar.estimate(task, RoutingAction(0, 1, (0, 1))).contact_ok
 
 
-def test_contact_search_changes_path_with_task_size(trace_factory, tiny_config):
-    trace = trace_factory(satellites=4, edges=((0, 1), (1, 3), (0, 2), (2, 3)))
+def test_router_changes_path_with_task_size(trace_factory, tiny_config):
+    trace = trace_factory(satellites=6, slots=24, edges=((0, 1), (1, 3), (0, 2), (2, 3)))
     trace = modified(trace, [(slice(2, None), 1, 3, 0), (slice(None), 0, 2, 80), (slice(None), 2, 3, 80)])
-    settings = deepcopy(tiny_config["routing"])
-    settings.update(candidate_generation="contact", k_paths=1, max_path_hops=2,
-                    reference_rate_fraction=1.0, lookahead_slots=5)
-    builder = CandidateBuilder(trace, [1000] * 4, settings)
-    small = builder.build(Task(0, 0, 10, 1, 20, 0), 0, [0] * 4, [0] * 4)
-    large = builder.build(Task(1, 0, 150, 1, 20, 0), 0, [0] * 4, [0] * 4)
-    assert next(c.action.path for c in small if c.action.compute_sat == 3) == (0, 1, 3)
-    assert next(c.action.path for c in large if c.action.compute_sat == 3) == (0, 2, 3)
-    settings["path_expansion_limit"] = 1
-    items = CandidateBuilder(trace, [1000] * 4, settings).build(Task(2, 0, 150, 1, 20, 0), 0, [0]*4, [0]*4)
-    assert items[0].search_truncated  # Budget exhaustion is not called optimality.
+    config = deepcopy(tiny_config)
+    config["topology"].update(planes=2, sats_per_plane=3)
+    config["tasks"]["hotspot_satellites"] = [0]
+    config["routing"].update(max_path_hops=2, reference_rate_fraction=1.0, lookahead_slots=5,
+                             contact_risk_weight_seconds=0, link_load_weight_seconds=0)
+    env = LeoEnv(config, trace, ((), (), ()), [1000] * 6)
+    obs, _ = env.reset()
+    calendar = ReservationCalendar.from_observation(obs)
+    router = ContactAwareRouter(config["routing"])
+    assert router.find_route(obs, Task(0, 0, 10, 1, 20, 0), 3, calendar).action.path == (0, 1, 3)
+    assert router.find_route(obs, Task(1, 0, 150, 1, 20, 0), 3, calendar).action.path == (0, 2, 3)
+    settings = dict(config["routing"], path_expansion_limit=1)
+    result = ContactAwareRouter(settings).find_route(obs, Task(2, 0, 150, 1, 20, 0), 3, calendar)
+    assert result.action is None and result.search_truncated
 
 
 def test_bidirectional_calendar_catches_batch_overbooking(trace_factory):
@@ -101,7 +105,7 @@ def test_calendar_seeds_residual_work_without_cpu_double_count(tiny_config):
     jobs = ((Task(0, 0, 1000, 1, 30, 0), Task(1, 1, 1000, 1, 30, 0)), (), ())
     env = LeoEnv(config, task_trace=jobs, cpu_capacities=[100]*6)
     env.reset()
-    obs, *_ = env.step({0: 0, 1: 0})
+    obs, *_ = env.step({0: 0, 1: 1})
     calendar = ReservationCalendar.from_observation(obs)
     task = Task(2, 0, 100, 1, 20, 1)
     estimate = calendar.estimate(task, RoutingAction(2, 0, (0,)))
@@ -116,8 +120,7 @@ def test_known_failed_input_does_not_reserve_downstream_cpu(trace_factory, tiny_
     jobs = ((Task(0, 0, 150, 1, 10, 0),), (), ())
     env = LeoEnv(config, trace, jobs, [1000]*6)
     obs, _ = env.reset()
-    remote = next(i for i, item in enumerate(obs.candidates[0]) if item.action.compute_sat == 2)
-    obs, *_ = env.step({0: remote})
+    obs, *_ = env.step({0: RoutingAction(0, 2, (0, 1, 2))})
     calendar = ReservationCalendar.from_observation(obs)
     assert 2 not in calendar.cpu
     assert calendar.links[(0, 1)] and calendar.links[(1, 2)]
@@ -150,3 +153,15 @@ def test_cached_contact_search_prefix_matches_full_route(trace_factory, horizon,
     assert prefix.route_seconds == pytest.approx(full.route_seconds)
     assert prefix.contact_margin_seconds == pytest.approx(full.contact_margin_seconds)
     assert prefix.capacity_margin_ratio == pytest.approx(full.capacity_margin_ratio)
+
+
+def test_cached_prefix_includes_bidirectional_bookings(trace_factory):
+    trace = trace_factory(satellites=3, edges=((0, 1), (1, 2)), propagation_seconds=0.25)
+    plan = ContactPlan.from_trace(trace, 0, 5)
+    task = Task(0, 0, 100, 1, 20, 0)
+    bookings = {(0, 1): [(0., 0.5)], (1, 2): [(1.5, 2.5)]}
+    prefix = plan.predict(task, (0,), 1.)
+    for first, second in ((0, 1), (1, 2)):
+        prefix = plan.append_hop(task, prefix, first, second, 1., bookings)
+    full = plan.predict(task, (0, 1, 2), 1., bookings)
+    assert prefix == full

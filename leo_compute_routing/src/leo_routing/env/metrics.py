@@ -28,6 +28,7 @@ def summarize(engine, slot_metrics):
             "completion_rate": fraction(lambda r: r["status"] == "completed"),
             "deadline_violation_rate": fraction(lambda r: r["deadline_missed"]),
             "route_failure_rate": fraction(lambda r: r["status"] == "route_failed"),
+            "routing_rejection_rate": fraction(lambda r: bool(r["routing_rejection_reason"])),
             "offloaded_route_failure_rate": divide(sum(r["status"] == "route_failed" for r in records),
                                                    sum(r["hops"] > 0 for r in records)),
             "censored_rate": fraction(lambda r: r["status"] == "censored"),

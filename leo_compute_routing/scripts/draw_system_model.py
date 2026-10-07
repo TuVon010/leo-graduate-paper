@@ -1,4 +1,4 @@
-"""Original bilingual publication-style system diagram, aligned with schema 2.
+"""Original bilingual publication-style system diagram, aligned with schema 3.
 
 Illustrative topology and contact windows; this is not an orbital data plot.
 Only matplotlib/numpy are required. Prefer an installed CJK font for Chinese.
@@ -84,9 +84,9 @@ def draw(language, output):
             ax.add_patch(Rectangle((x+.06+i*(width-.10)/4, y+.055), (width-.17)/4, .19,
                                    facecolor=color if i<count else "#E9EFF4", edgecolor="none", zorder=8))
 
-    t(.55, 10.24, "接触窗口感知的 LEO 星上计算与路由系统", "Contact-aware LEO computing and routing system", size=21, weight="bold")
-    t(.57, 9.80, "任务已在源卫星 · 联合选择计算目的节点与多跳路径 · 动态共享通信和计算资源",
-      "Tasks at source satellites  |  Joint compute-node/path selection  |  Shared communication and computation", size=11.5, color=MUTED)
+    t(.55, 10.24, "LEO 卫星边缘计算的分层协同系统", "Hierarchical LEO satellite edge computing system", size=21, weight="bold")
+    t(.57, 9.80, "PPO 选计算卫星 · 图路由决定传输路径 · KKT 分配链路和 CPU",
+      "PPO selects compute node  |  Graph routing finds a path  |  KKT allocates link and CPU resources", size=11.5, color=MUTED)
 
     # (a) physical scene: orbital lines provide context, selected data edges are explicit.
     physical_panel = box(.5, 3.95, 8.0, 5.44, fill="#FCFDFE", edge="#D7E0E8", radius=.16, z=0)
@@ -162,7 +162,7 @@ def draw(language, output):
     t(x0,1.90,r"$t_n$",size=10.5,ha="center")
     t(x1,1.90,r"$t_n+H\delta t$",size=10.5,ha="center")
     t(.83,2.91,"可用链路","Available link",size=10.5)
-    t(.83,2.46,"风险候选","Risky candidate",size=10.5)
+    t(.83,2.46,"风险路径","Risky route",size=10.5)
     ax.add_patch(Rectangle((x0,2.76),4.70,.26,facecolor="#CCE4DB",edgecolor="none",zorder=2))
     ax.add_patch(Rectangle((x0+.30,2.81),1.52,.16,facecolor=BLUE,edgecolor="none",zorder=3))
     t(x0+2.07,2.90,"发送在窗口内完成","Transmission fits",size=9.5,color=GREEN)
@@ -180,16 +180,16 @@ def draw(language, output):
     arrow((8.28,8.18),(9.38,8.18),PURPLE,1.4,(0,(4,3)))
     t(8.61,8.41,"状态摘要","State",size=9.5,color=PURPLE,ha="center")
     stages = [
-        (7.58,"1  接触计划与窗口建模","1  Contact-plan / window modeling",
-         "未来 ISL 可用区间、参考容量","ISL availability intervals and reference capacity",BLUE),
-        (6.40,"2  接触窗口感知候选生成","2  Contact-aware candidate generation",
-         "计算目的节点 + 当前图中的无环路径","Compute node + loop-free path in the current graph",BLUE),
-        (5.22,"3  预测可行性 Shield","3  Predictive feasibility shield",
-         "接触 / 期限 / 覆盖 + 链路与 CPU 预约日历","Contact / deadline / coverage + service calendars",PURPLE),
-        (4.04,"4  任务感知 GAT-PPO","4  Task-aware GAT-PPO",
-         "变长候选评分，选择 $(s_u^\star,\pi_u)$","Variable-candidate scoring: select $(s_u^\star,\pi_u)$",PURPLE),
-        (2.86,"5  局部 KKT 资源分配","5  Local KKT resource allocation",
-         "共享 ISL 速率 + 星上 CPU 分配","Shared ISL rates and onboard CPU allocation",GREEN),
+        (7.58,"1  当前状态与接触计划","1  Current state and contact plan",
+         "当前任务 / 工作量 + 有限未来 ISL 窗口","Current tasks / workload + bounded ISL forecast",BLUE),
+        (6.40,"2  GAT 图状态编码","2  GAT graph-state encoding",
+         "节点 CPU / 在途负载；边容量 / 接触信息","Node CPU / in-flight load; link capacity / contacts",BLUE),
+        (5.22,"3  PPO 选择计算卫星","3  PPO selects computing satellite",
+         "直接输出计算节点 $s_u^\star$，不输出路径","Output computing node $s_u^\star$ only",PURPLE),
+        (4.04,"4  预测接触感知图路由","4  Predictive contact-aware graph routing",
+         "选定节点后找路径；检查接触与预测期限","Find a path to selected node; check contact / deadline",PURPLE),
+        (2.86,"5  KKT 链路与 CPU 分配","5  KKT link and CPU allocation",
+         "当前活动任务共享预算，事件发生时重分配","Share active-task budgets; reallocate on events",GREEN),
     ]
     for y,ch,en,sub_ch,sub_en,color in stages:
         box(9.39,y,5.39,.86,fill="white",edge=color,lw=1.15,radius=.08,z=3)
@@ -201,9 +201,9 @@ def draw(language, output):
     for a,b in (((14.78,4.47),(15.28,4.47)),((15.28,4.47),(15.28,5.65))):
         arrow(a,b,PURPLE,1.1,ends="-")
     arrow((15.28,5.65),(14.78,5.65),PURPLE,1.1)
-    t(15.56,5.04,"同批选择后\n重算预约", "Rebook each\nbatch choice",size=9,color=PURPLE,ha="center",rotation=90)
-    t(9.44,2.38,"预约用于预测筛选；实际服务仍按动态共享执行",
-      "Calendars predict feasibility; execution uses dynamic sharing",size=10,color=MUTED)
+    t(15.56,5.04,"同批选择后\n更新预约", "Book each\nbatch choice",size=9,color=PURPLE,ha="center",rotation=90)
+    t(9.44,2.38,"无法传输则记录拒绝并本地回退；预约仅用于预测",
+      "Reject / record unroutable requests; calendars predict service",size=10,color=MUTED)
     t(9.44,2.05,"策略不绑定固定卫星 ID；可测试不同星座规模",
       "No fixed satellite-ID output layer; evaluate unseen scales",size=10,color=MUTED)
     arrow((9.39,3.29),(8.28,6.23),GREEN,1.25,(0,(4,3)))
@@ -228,7 +228,7 @@ def draw(language, output):
     stem = "system_model_" + language
     for extension in ("png","svg","pdf"):
         path = output / (stem + "." + extension)
-        fig.savefig(path,dpi=220,facecolor="white",metadata={"Title":"Contact-aware LEO computing and routing system"} if extension=="pdf" else None)
+        fig.savefig(path,dpi=220,facecolor="white",metadata={"Title":"Hierarchical LEO satellite edge computing system"} if extension=="pdf" else None)
         print(path.resolve())
     plt.close(fig)
 

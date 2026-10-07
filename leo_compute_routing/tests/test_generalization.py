@@ -12,8 +12,7 @@ from leo_routing.evaluation.generalization import run_generalization
 
 def test_generalization_preserves_checkpoints_and_reports_heldout_anchor(tiny_config, tmp_path):
     config = deepcopy(tiny_config)
-    config["routing"]["candidate_generation"] = "contact"
-    config["rl"] = {"hidden_dim": 16, "device": "cpu", "shield_mode": "contact"}
+    config["rl"] = {"hidden_dim": 16, "device": "cpu"}
     agent = PPOAgent(config)
     checkpoint = tmp_path / "model.pt"
     agent.save(checkpoint)
@@ -31,16 +30,17 @@ def test_generalization_preserves_checkpoints_and_reports_heldout_anchor(tiny_co
     study = json.loads((tmp_path / "study/study.json").read_text())
     assert study["weights_frozen"] and study["feature_scales_from_training_checkpoint"]
     with pytest.raises(ValueError, match="overlap"):
-        run_generalization([checkpoint], {"same": config}, [0, 201], tmp_path / "overlap")
+        run_generalization([checkpoint], {"same": config}, [2026, 201], tmp_path / "overlap")
 
 
-def test_checkpoint_keeps_own_candidate_generator_during_ablation(tiny_config):
+def test_checkpoint_keeps_own_router_mode_during_ablation(tiny_config):
     config = deepcopy(tiny_config)
     config["rl"] = {"device": "cpu"}
+    config["routing"]["mode"] = "snapshot"
     agent = PPOAgent(config)
     evaluation = deepcopy(config)
-    evaluation["routing"]["candidate_generation"] = "contact"
-    assert agent.configure_environment(evaluation)["routing"]["candidate_generation"] == "ksp"
+    evaluation["routing"]["mode"] = "contact"
+    assert agent.configure_environment(evaluation)["routing"]["mode"] == "snapshot"
 
 
 def test_single_seed_pilot_has_no_confidence_interval(tiny_config, tmp_path):

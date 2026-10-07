@@ -21,30 +21,25 @@ from leo_routing.utils.console import capture_console, console_log_path
 
 
 CASES = {
-    "coupled24": "configs/experiments/contact24_ppo.yaml",
-    "compute24": "configs/experiments/contact_compute_heavy_ppo.yaml",
-    "link24": "configs/experiments/contact_link_heavy_ppo.yaml",
-    "contact66": "configs/experiments/contact_dynamic_ppo.yaml",
-    "compute24_tuned": "configs/experiments/contact_compute_tuned.yaml",
-    "contact66_tuned": "configs/experiments/contact_dynamic_tuned.yaml",
-    "contact66_balanced_tuned": "configs/experiments/contact_dynamic_balanced_tuned.yaml",
-    "scale48": "configs/experiments/contact48_ppo.yaml",
-    "smoke": "configs/contact_smoke.yaml",
+    "compute24": "configs/experiments/compute24.yaml",
+    "contact66": "configs/experiments/contact66.yaml",
+    "contact66_balanced": "configs/experiments/contact66_balanced.yaml",
+    "scale48": "configs/experiments/scale48.yaml",
+    "smoke": "configs/rl_smoke.yaml",
 }
 VARIANTS = {
     "full": [],
     "mlp": ["rl.encoder=mlp"],
-    "no_shield": ["rl.shield_mode=none"],
-    "static_mask": ["rl.shield_mode=mask"],
-    "ksp": ["routing.candidate_generation=ksp"],
+    "snapshot_route": ["routing.mode=snapshot", "rl.use_future=false"],
     "no_future": ["rl.use_future=false"],
     "no_booking": ["rl.use_reservations=false"],
+    "no_node_mask": ["rl.use_mask=false"],
     "equal": ["resource.allocation=equal"],
 }
 SUITES = {
     "main": ["full", "mlp"],
-    "shield": ["full", "no_shield", "static_mask"],
-    "modules": ["full", "ksp", "no_future", "no_booking"],
+    "routing": ["full", "snapshot_route", "no_future"],
+    "modules": ["full", "no_booking", "no_node_mask"],
     "resource": ["full", "equal"],
     "scale": ["full", "mlp"],
     "all": list(VARIANTS),
@@ -52,7 +47,7 @@ SUITES = {
     "sensitivity": ["full", "mlp"],
 }
 BASELINES = ["local", "shortest_offload", "least_load", "computing_aware",
-             "computing_aware_future", "batch_greedy", "batch_greedy_future", "contact_greedy"]
+             "computing_aware_future", "batch_greedy", "node_greedy"]
 
 
 def read_json(path):
@@ -181,8 +176,8 @@ def train_case(args, case, variants):
 def evaluate_case(args, case, variants, label=None, config=None, algorithms=None, own_config=False):
     label = label or args.suite
     selected_algorithms = list(args.algorithms if algorithms is None else algorithms)
-    if algorithms is None and case.endswith("_tuned") and "contact_greedy" not in selected_algorithms:
-        selected_algorithms.append("contact_greedy")  # mandatory no-learning control for the new prior
+    if algorithms is None and "node_greedy" not in selected_algorithms:
+        selected_algorithms.append("node_greedy")  # same router/resource control isolates learned node selection
     for initialization in args.initializations:
         checkpoints = [training_path(args.output, case, variant, initialization) / "best.pt" for variant in variants]
         if not args.dry_run and any(not path.exists() for path in checkpoints):
@@ -208,7 +203,7 @@ def generalize(args):
     for initialization in args.initializations:
         checkpoints = [training_path(args.output, "scale48", v, initialization) / "best.pt" for v in ("full", "mlp")]
         command = [sys.executable, "-u", "scripts/run_generalization.py", "--checkpoints", *checkpoints,
-                   "--configs", *[PROJECT_ROOT / ("configs/experiments/contact%s_ppo.yaml" % n) for n in (24, 48, 72, 96)],
+                   "--configs", *[PROJECT_ROOT / ("configs/experiments/scale%s.yaml" % n) for n in (24, 48, 72, 96)],
                    "--seeds", *args.test_seeds, "--device", args.eval_device, "--algorithms", *args.algorithms,
                    "--output", args.output / "generalization" / ("init_%s" % initialization)]
         command += ["--log-interval-seconds", args.log_interval_seconds]
@@ -251,7 +246,7 @@ def parse_args():
     parser.add_argument("--cases", choices=CASES, nargs="+", default=["compute24", "contact66"])
     parser.add_argument("--initializations", type=int, nargs="+", default=[2026])
     parser.add_argument("--test-seeds", type=int, nargs="+",
-                        help="Default: seed 100 with labeled validation reuse for tuned cases; 201 for legacy cases")
+                        help="Default: seed 100 with labeled validation reuse; scale uses held-out seed 301")
     parser.add_argument("--allow-validation-reuse", action="store_true",
                         help="Use validation seeds for a labeled development comparison")
     parser.add_argument("--algorithms", choices=BASELINES, nargs="*", default=BASELINES[:-1])
@@ -264,9 +259,9 @@ def parse_args():
     parser.add_argument("--log-interval-seconds", type=float, default=10.0)
     args = parser.parse_args()
     if args.test_seeds is None:
-        tuned = all(case.endswith("_tuned") for case in args.cases)
-        args.test_seeds = [100] if tuned else [201]
-        args.allow_validation_reuse = args.allow_validation_reuse or tuned
+        development = args.suite != "scale"
+        args.test_seeds = [100] if development else [301]
+        args.allow_validation_reuse = args.allow_validation_reuse or development
     if args.updates < 1 or any(i < 0 for i in args.initializations + args.test_seeds):
         parser.error("Use positive updates and nonnegative seeds")
     if not math.isfinite(args.log_interval_seconds) or args.log_interval_seconds <= 0:
@@ -301,7 +296,7 @@ def run(args):
     if args.suite == "audit":
         for case in args.cases:
             execute([sys.executable, "-u", "scripts/audit_route_exposure.py", "--config", PROJECT_ROOT / CASES[case],
-                     "--seeds", "50", "--max-tasks", "256", "--output", args.output / "audit" / case],
+                     "--seeds", "100", "--max-tasks", "256", "--output", args.output / "audit" / case],
                     args.output, "audit/" + case, args.dry_run)
         return
     if args.suite == "sensitivity":

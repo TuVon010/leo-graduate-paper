@@ -1,452 +1,225 @@
 # System Model
 
-![Contact-aware LEO computing and routing system](../paper_figures/system_model_en.png)
+![LEO satellite edge computing system](../paper_figures/system_model_en.png)
 
-Figure: Physical constellation, contact windows, and joint decision workflow. Tasks are executed locally or forwarded to selected computing satellites; predictive screening and policy decisions are followed by execution on shared ISLs and CPUs. Topology, workloads, and windows are illustrative. See [vector figures, captions, and regeneration instructions](../paper_figures/README.md).
+We consider a multi-LEO satellite edge computing system comprising satellites $\mathcal S=\{0,\ldots,S-1\}$. Satellite $s$ carries an onboard server with effective capacity $F_s$ CPU cycles/s and exchanges task inputs through inter-satellite links (ISLs). Tasks may execute at their source or be offloaded to another satellite. The proposed architecture separates three decisions: graph reinforcement learning selects the computing satellite, predictive contact-aware graph routing determines a path to that selected satellite, and closed-form resource optimization allocates realized communication and computation service.
 
-The optional tuned learning configuration added on 2026-10-06 preserves the physical model and cost below. Its candidate logit is $z_\theta(c)-\alpha\log(1+\widehat T_c^{\rm cal}/t_{\rm scale})$, where the completion-time estimate uses the existing predictive reservation calendar. Setting $\alpha=0$ recovers the policy without this prior; a nonzero setting is a completion-time prior with learned residual logits. Value scaling is a numerical training mechanism; GAE, rewards, and evaluation remain in original units. Compare this variant with the no-learning `contact_greedy` calendar control. See the [pilot diagnosis](PILOT_ANALYSIS_20261006.md).
+The admission horizon contains $N$ slots of duration $\delta t$, with boundary $t_n=n\delta t$. Decisions occur at boundaries, whereas transmission, propagation and computation evolve through continuous-time events. Residual work persists across slots. After admission, the system drains for at most $N_d$ slots without new tasks. A logical controller observes current tasks, topology and workloads and a bounded orbit forecast; future task arrivals are unavailable. Task inputs are already at their source satellites. Ground access, result return, signaling overhead and energy are outside this model.
 
-We consider a computing-enabled low Earth orbit (LEO) satellite network in which satellites jointly provide inter-satellite data forwarding and onboard task execution. Let $\mathcal S=\{1,\ldots,S\}$ denote the satellite set. Each satellite carries a computing server with an effective processing capacity $F_s$ in CPU cycles per second. A task can be executed at its source satellite or forwarded through inter-satellite links (ISLs) to another computing satellite. The destination and forwarding path are selected jointly, since a short communication path may lead to a heavily loaded server, whereas a lightly loaded server may become difficult to reach as the topology evolves. This setting follows the general motivation of computing-aware satellite routing, while the execution and prediction models below specify the system considered in this work. [Computing-aware LEO routing](https://arxiv.org/abs/2211.08820)
+## A. Orbital Motion and Dynamic ISL Topology
 
-The task-admission horizon is divided into $N$ slots of duration $\delta t$. The beginning of slot $n$ is $t_n=n\delta t$, where $n\in\{0,\ldots,N-1\}$. Routing decisions are made at slot boundaries, whereas transmission, propagation, and computation evolve in continuous time within each slot. Tasks unfinished at a boundary retain their remaining service requirements in subsequent slots. After the admission horizon, an additional drain period of at most $N_{\rm d}$ slots is allowed without new task arrivals. The maximum observation horizon is therefore $\bar T=(N+N_{\rm d})\delta t$.
-
-We assume a logical controller has access to current topology, computing capacities, workload summaries, and newly arrived tasks. Short-term orbital snapshots are also available for route prediction, but future task arrivals are unknown. The controller is an abstraction of the decision mechanism; signaling overhead and state-reporting delays are outside the present model. Task inputs are assumed to be available at their source satellites. Ground access transmission, result delivery, and satellite energy consumption are not included in the cost considered here.
-
-## A. Orbital Motion and Dynamic Topology
-
-We use a circular two-body Walker-Delta constellation to generate satellite positions. Let $P$ denote the number of orbital planes, $J$ the number of satellites per plane, and $S=PJ$. For plane index $p\in\{0,\ldots,P-1\}$ and member index $j\in\{0,\ldots,J-1\}$, the right ascension and initial orbital phase are
+A circular two-body Walker-Delta constellation has $P$ planes and $J$ satellites per plane, with $S=PJ$. For plane $p$ and member $j$, define
 
 $$
-\Omega_p=\frac{2\pi p}{P},\qquad
-\psi_{p,j}=\frac{2\pi j}{J}+\frac{2\pi F_{\rm W}p}{PJ},
+\Omega_p=\frac{2\pi p}{P},\quad \psi_{p,j}=\frac{2\pi j}{J}+\frac{2\pi F_Wp}{PJ},\quad
+r=R_E+h,\quad \nu=\sqrt{\mu_E/r^3},\quad \vartheta_{p,j}[n]=\psi_{p,j}+\nu t_n.
 $$
 
-where $F_{\rm W}$ is the Walker phasing factor. Given orbital altitude $h$, Earth radius $R_{\rm E}$, and gravitational parameter $\mu_{\rm E}$, the orbital radius and angular speed are
+Here $F_W,h,R_E,\mu_E$ denote the phase factor, altitude, Earth radius and gravitational parameter. Given inclination $i$, the Earth-centered inertial position is
 
 $$
-r_{\rm orb}=R_{\rm E}+h,\qquad
-\nu_{\rm orb}=\sqrt{\frac{\mu_{\rm E}}{r_{\rm orb}^{3}}}.
-$$
-
-Let $i$ be the inclination and $\vartheta_{p,j}[n]=\psi_{p,j}+\nu_{\rm orb}t_n$. The Earth-centered inertial position of satellite $(p,j)$ is
-
-$$
-\mathbf q_{p,j}[n]=r_{\rm orb}
-\begin{bmatrix}
+\mathbf q_{p,j}[n]=r\begin{bmatrix}
 \cos\Omega_p\cos\vartheta_{p,j}[n]-\sin\Omega_p\sin\vartheta_{p,j}[n]\cos i\\
 \sin\Omega_p\cos\vartheta_{p,j}[n]+\cos\Omega_p\sin\vartheta_{p,j}[n]\cos i\\
 \sin\vartheta_{p,j}[n]\sin i
 \end{bmatrix}.
 $$
 
-Satellite trajectories are prescribed by orbital motion and are not optimization variables. This model is an idealized orbital approximation rather than a TLE-driven high-fidelity propagator.
+ISLs satisfy a maximum distance, Earth clearance, degree budget and cross-plane latitude limit. With $d_{ij}[n]=\|\mathbf q_i[n]-\mathbf q_j[n]\|$, line of sight requires
 
-The network in slot $n$ is represented by an undirected graph $\mathcal G[n]=(\mathcal S,\mathcal E[n])$. For satellites $s$ and $s'$, their distance is
-
-$$
-d_{s,s'}[n]=\lVert\mathbf q_s[n]-\mathbf q_{s'}[n]\rVert_2.
-$$
-
-An ISL is geometrically eligible only when its distance does not exceed $d_{\max}$ and its line segment clears the Earth with margin $h_{\rm clr}$:
-
-$$
-\min_{\alpha\in[0,1]}
-\left\lVert\mathbf q_s[n]+\alpha\big(\mathbf q_{s'}[n]-\mathbf q_s[n]\big)\right\rVert_2
->R_{\rm E}+h_{\rm clr}.
-$$
-
-The link-selection rule considers neighboring satellites within each orbital plane and eligible pairs in adjacent planes. Inter-plane connections additionally satisfy a latitude limit. Eligible pairs are selected subject to a maximum node degree $d_{\rm deg}$, with closer inter-plane pairs preferred. Consequently, geometric visibility alone does not imply that an ISL is established. Let $a_{s,s'}^{\rm ISL}[n]\in\{0,1\}$ indicate the selected link, with $a_{s,s'}^{\rm ISL}[n]=a_{s',s}^{\rm ISL}[n]$ and
-
-$$
-\sum_{s'\ne s}a_{s,s'}^{\rm ISL}[n]\le d_{\rm deg},\qquad \forall s,n.
-$$
-
-The selected topology and its link attributes are held constant over $[t_n,t_{n+1})$. Connectivity is not enforced by adding links that violate the selection rule.
-
-## B. Task and Computing-Destination Model
-
-Let $\mathcal B_n$ denote the batch of tasks arriving at $t_n$, and let $\mathcal U=\bigcup_{n=0}^{N-1}\mathcal B_n$. Task $u\in\mathcal B_n$ is represented by
-
-$$
-\{s_u,t_u,D_u,C_u,\tau_u\},\qquad t_u=t_n,
-$$
-
-where $s_u$ is the source satellite, $D_u$ is the input size in bits, $C_u$ is the required CPU cycles per bit, and $\tau_u$ is the latency deadline relative to arrival. Its total computing workload is
-
-$$
-W_u=D_uC_u.
-$$
-
-Tasks are indivisible: each task is executed entirely at one computing satellite. Local execution refers to computation at $s_u$; remote execution requires forwarding the complete input to another satellite. Task splitting, intermediate computation, and execution migration are not considered.
-
-In the stochastic workload model, the batch size is Poisson distributed with mean $\lambda_{\rm a}$ per slot. Spatial heterogeneity is represented by a hotspot set $\mathcal H\subseteq\mathcal S$. With probability $p_{\rm hot}$, a source is drawn uniformly from $\mathcal H$; otherwise it is drawn uniformly from $\mathcal S$. Hence,
-
-$$
-\Pr(s_u=s)=\frac{1-p_{\rm hot}}{S}
-+\mathbf 1\{s\in\mathcal H\}\frac{p_{\rm hot}}{|\mathcal H|}.
-$$
-
-Task sizes, computing intensities, and deadlines are independently sampled from configured uniform distributions over bounded ranges. Their distributions and the hotspot mixture are experimental workload parameters.
-
-To bound the decision space, the candidate computing set contains satellites within $H_{\rm c}$ shortest-path hops of the source in the current graph:
-
-$$
-\mathcal S_u[n]=\left\{s\in\mathcal S:
-\operatorname{dist}_{\mathcal G[n]}(s_u,s)\le H_{\rm c}\right\}.
-$$
-
-For each remote destination, at most $K$ loop-free paths of at most $H_{\rm p}$ hops are retained. The legacy KSP configuration ranks paths using the reference communication cost
-
-$$
-\ell_e[n]=\frac{D_{\rm ref}}{R_e[n]}+\frac{d_e[n]}{c_0},
-$$
-
-where $D_{\rm ref}$ is a fixed reference input size, $R_e[n]$ is link capacity in bits per second, and $c_0$ is the speed of light. This ranking constructs a bounded candidate set; it does not enumerate every route optimal for every task size or congestion state.
-
-The proposed contact-aware configuration instead uses task-specific data size and rolling contact windows. Bounded search enumerates current-graph paths, prioritizes paths without predicted contact loss, and ranks retained paths by estimated communication plus committed-workload and computing time. Each destination retains at most $K$ paths. Budget exhaustion is recorded explicitly, so the candidate set is not claimed to contain the global optimum. Section G specifies the contact and reservation predictions.
-
-Let $\mathcal C_u[n]$ denote the resulting destination-path candidates. Candidate $c$ contains a computing satellite $s(c)$ and a path $\pi(c)=(s_u,\ldots,s(c))$. The local candidate is $(s_u,(s_u))$ and has zero communication hops. The binary selection variable $x_{u,c}$ satisfies
-
-$$
-\sum_{c\in\mathcal C_u[n]}x_{u,c}=1,\qquad
-x_{u,c}\in\{0,1\},\qquad \forall u\in\mathcal B_n.
-$$
-
-The selected destination $s_u^{\star}$ and path $\pi_u$ remain fixed throughout the task's execution.
-
-## C. Inter-Satellite Communication Model
-
-Each established ISL $e=\{s,s'\}$ provides an aggregate service capacity $R_e[n]$. The base model uses a common configured ISL capacity, while the formulation allows snapshot-dependent capacities. An unavailable link has zero capacity. Here, capacity denotes a data service rate in bits per second, rather than radio bandwidth in hertz.
-
-The configured capacity may represent the effective budget assigned to the studied task class, rather than the hardware peak rate. Capacity reserved for other services can be abstracted by this budget; their traffic and the underlying physical-layer link budget are not explicitly simulated.
-
-Let $\mathcal A_e^{\rm tx}(t)$ be the set of tasks currently transmitting over link $e$. Both forwarding directions share the same undirected-link budget. If $r_{u,e}(t)$ is the rate allocated to task $u$, then
-
-$$
-r_{u,e}(t)\ge0,\qquad
-\sum_{u\in\mathcal A_e^{\rm tx}(t)}r_{u,e}(t)\le R_e[n(t)],
-\qquad n(t)=\left\lfloor\frac{t}{\delta t}\right\rfloor.
-$$
-
-A task receives link service only while it is transmitting on its current hop. Propagating tasks do not consume transmission capacity.
-
-Communication follows complete-input store-and-forward operation. For path $\pi_u=(s_{u,0},\ldots,s_{u,L_u})$, let $b_{u,\ell}$ and $e_{u,\ell}$ denote the transmission start and finish times of hop $\ell\in\{1,\ldots,L_u\}$. Each hop must transmit all $D_u$ bits, and its finish time satisfies
-
-$$
-e_{u,\ell}=\inf\left\{t\ge b_{u,\ell}:
-\int_{b_{u,\ell}}^{t}r_{u,\{s_{u,\ell-1},s_{u,\ell}\}}(z)\,dz\ge D_u\right\}.
-$$
-
-The propagation duration is
-
 $$
-p_{u,\ell}=\frac{d_{\{s_{u,\ell-1},s_{u,\ell}\}}[n(e_{u,\ell}^{-})]}{c_0}.
+\min_{\zeta\in[0,1]}\|\mathbf q_i[n]+\zeta(\mathbf q_j[n]-\mathbf q_i[n])\|>R_E+h_{\rm clr}.
 $$
 
-Thus, $b_{u,1}=t_u$ and $b_{u,\ell+1}=e_{u,\ell}+p_{u,\ell}$. The distance is taken from the final transmission-service snapshot. If transmission finishes exactly at a topology boundary, its completion is settled before applying the next snapshot. Once the input has been fully transmitted on a hop, subsequent disappearance of that link does not cancel propagation already in progress.
+Eligible neighboring satellites within each plane are connected first. Eligible adjacent-plane links are then added in increasing distance order, respecting maximum degree $d_{\max}$. This produces $G[n]=(\mathcal S,\mathcal E[n])$ without fabricating connectivity. This exogenous link rule is independent of the learned offloading policy. Although topology can be cached offline, the policy receives only its specified forecast window.
 
-If the current hop becomes unavailable before transmission finishes, or is unavailable when that hop is entered, the task terminates with a route failure. The present model does not reroute failed tasks. Availability of every edge at admission therefore does not guarantee successful delivery along the complete path.
+An active undirected link $e=\{i,j\}$ has task-class capacity $R_e[n]$ and propagation delay $d_{ij}[n]/c_0$. Default active-link capacity is constant; distance affects eligibility and propagation rather than an additional fading model. This is an idealized orbital and service-budget model, not TLE/SGP4 propagation or a measured hardware simulator.
 
-## D. Computing Service and Workload States
+## B. Tasks and Whole-Task Offloading
 
-A remotely assigned task becomes eligible for CPU service only after the final-hop propagation is complete. Its computing arrival time is
+Let $\mathcal U[n]$ denote the arriving batch. Task $u$ is represented by
 
 $$
-t_u^{\rm cpu}=\begin{cases}
-t_u,&L_u=0,\\
-e_{u,L_u}+p_{u,L_u},&L_u>0.
-\end{cases}
+u=(s_u,D_u,C_u,\tau_u,t_u),\qquad W_u=D_uC_u,\qquad t_u=t_n,
 $$
 
-Let $\mathcal A_s^{\rm cpu}(t)$ denote the set of tasks whose inputs have arrived and whose computation at satellite $s$ remains unfinished. The allocated CPU rate $f_{s,u}(t)$ satisfies
+where $s_u,D_u,C_u,\tau_u$ denote source, input bits, cycles/bit and relative deadline. Batch size is Poisson; input size, complexity and deadline are independently uniform in their configured ranges. For hotspot set $\mathcal H$ and mixture weight $p_h$,
 
 $$
-f_{s,u}(t)\ge0,\qquad
-\sum_{u\in\mathcal A_s^{\rm cpu}(t)}f_{s,u}(t)\le F_s,
-\qquad \forall s,t.
+\Pr(s_u=s)=\frac{1-p_h}{S}+\frac{p_h}{|\mathcal H|}\mathbf1\{s\in\mathcal H\}.
 $$
 
-The server uses processor sharing, so multiple eligible tasks can receive CPU service concurrently. Rates are zero for tasks outside the corresponding service set. For a task in the computing stage, its remaining workload $W_u^{\rm rem}(t)$ evolves as
+Thus actual hotspot share includes the uniform component. Heterogeneous CPU capacities are sampled once per replay seed and remain fixed throughout that replay.
 
-$$
-\frac{dW_u^{\rm rem}(t)}{dt}=-f_{s_u^{\star},u}(t),\qquad
-W_u^{\rm rem}(t_u^{\rm cpu})=W_u.
-$$
-
-The delivered CPU workload and the committed in-flight workload are separately defined as
-
-$$
-Q_s(t)=\sum_{u\in\mathcal A_s^{\rm cpu}(t)}W_u^{\rm rem}(t),
-$$
+Binary association $a_{u,s}$ indicates the actual execution satellite:
 
 $$
-\widetilde Q_s(t)=
-\sum_{\substack{u\text{ in transmission or propagation}\\s_u^{\star}=s}}W_u.
+a_{u,s}\in\{0,1\},\qquad\sum_{s\in\mathcal S}a_{u,s}=1.
 $$
 
-The in-flight workload captures future demand already assigned to a server, but it is not eligible for CPU allocation. In particular, $Q_s/F_s$ is a workload-based congestion indicator; it is not an additional first-come-first-served waiting time added to processor-sharing execution.
+Tasks are indivisible. PPO samples only a requested computing satellite $\widetilde s_u\in\mathcal S$; its action does not contain a path or a preconstructed node--path combination. An independent graph router runs after node selection. Local execution uses path $(s_u)$.
 
-## E. Structured Communication and Computing Allocation
+## C. Contact Windows and Routing to the Selected Satellite
 
-For a fixed active service set $\mathcal A$ with positive workloads $w_u$, consider the static resource-allocation subproblem
+At boundary $t_n$, the controller receives the current and next $H$ snapshots, covering until $t_n+(H+1)\delta t$. The nominal lookahead is $H\delta t$; $H=0$ uses only the current snapshot. Consecutive available intervals form the contact plan
 
 $$
-\min_{\{z_u>0\}}\sum_{u\in\mathcal A}\frac{w_u}{z_u},
-\qquad \text{s.t.}\quad\sum_{u\in\mathcal A}z_u\le Z_{\rm res}.
+\mathcal C_e[n]=\{[b_{e,k},d_{e,k})\}_k,\qquad K_{e,k}=\int_{b_{e,k}}^{d_{e,k}}R_e(t)\,dt.
 $$
 
-Here, $Z_{\rm res}>0$ is the resource budget. Its solution is $z_u^{\star}=Z_{\rm res}\sqrt{w_u}/\sum_{v\in\mathcal A}\sqrt{w_v}$. We use this structure to allocate resources among the current service participants:
-
-$$
-f_{s,u}(t)=F_s
-\frac{\sqrt{W_u}}{\sum_{v\in\mathcal A_s^{\rm cpu}(t)}\sqrt{W_v}},
-\qquad u\in\mathcal A_s^{\rm cpu}(t),
-$$
-
-$$
-r_{u,e}(t)=R_e[n(t)]
-\frac{\sqrt{D_u}}{\sum_{v\in\mathcal A_e^{\rm tx}(t)}\sqrt{D_v}},
-\qquad u\in\mathcal A_e^{\rm tx}(t).
-$$
-
-The allocation weights use original task workloads and input sizes. Remaining cycles and bits determine completion events. Allocations are recomputed when service membership or topology changes and are held constant between events. Empty service sets receive no allocation.
-
-These expressions solve the stated fixed-set surrogate and always respect resource budgets. They are not a global optimum for the dynamic completion-time problem, in which the active sets change as tasks progress. All evaluated routing policies use the same allocation rule, allowing comparisons to isolate their destination-path decisions.
-
-## F. Task Delay, Deadlines, and Terminal Outcomes
-
-For a successfully completed task, the completion time is
-
-$$
-t_u^{\rm cmp}=\inf\left\{t\ge t_u^{\rm cpu}:
-\int_{t_u^{\rm cpu}}^{t}f_{s_u^{\star},u}(z)\,dz\ge W_u\right\}.
-$$
+A window ending at the forecast boundary does not certify an actual contact closure. Remote transmissions beyond covered intervals are excluded by default. Unverified extrapolation, when enabled, is reported explicitly. Future traffic is never inspected.
 
-The actual task completion delay is
+After PPO selects $\widetilde s_u$, the router searches loop-free current-graph paths to that node only:
 
 $$
-\begin{aligned}
-T_u&=t_u^{\rm cmp}-t_u\\
-&=\sum_{\ell=1}^{L_u}\big(e_{u,\ell}-b_{u,\ell}+p_{u,\ell}\big)
-+t_u^{\rm cmp}-t_u^{\rm cpu}.
-\end{aligned}
+\pi_u=(v_0=s_u,v_1,\ldots,v_{h_u}=\widetilde s_u),\qquad h_u\le H_p.
 $$
 
-For local execution, the communication sum is zero. Competition is already reflected in the time-varying service rates and the resulting transmission and computation durations. No extra $Q_s/F_s$ term is added to this realized delay.
+Using actual task input size and reference rate $\eta_RR_e(t)$, the router checks predicted sending intervals against future link availability. For reference calendar bookings $\mathcal B_e$, one hop must satisfy
 
-The absolute deadline is $t_u+\tau_u$. We define on-time success by
-
 $$
-I_u^{\rm suc}=\mathbf 1\{u\text{ is completed and }T_u\le\tau_u\}.
+\int_{\widehat b_{u,e}}^{\widehat d_{u,e}}\eta_RR_e(t)\mathbf1\{t\notin\mathcal B_e\}\,dt\ge D_u,
 $$
 
-A deadline violation is recorded once if an unfinished active task reaches its deadline. In the default model, such a task continues receiving service, allowing its eventual delay to be measured. Deadlines are therefore soft service requirements. A route failure occurring before the deadline is an unsuccessful outcome but does not automatically count as an observed deadline violation.
+with uninterrupted contact during the sending interval. Propagation follows transmission; the next hop begins only after full arrival. Propagation does not require continued contact. Reference bookings may postpone sending, but the implementation does not wait across known contact gaps or reroute during execution.
 
-Tasks still active at $\bar T$ are censored. Let $\mathcal U_{\rm cmp}$ denote completed tasks and $\mathcal U_{\rm eval}$ the evaluated arrival cohort. Mean completion delay and on-time success rate are
+The route score is
 
 $$
-\overline T_{\rm cmp}=\frac{1}{|\mathcal U_{\rm cmp}|}
-\sum_{u\in\mathcal U_{\rm cmp}}T_u,\qquad
-\rho_{\rm suc}=\frac{1}{|\mathcal U_{\rm eval}|}
-\sum_{u\in\mathcal U_{\rm eval}}I_u^{\rm suc},
+J_{\rm route}(\pi_u)=\widehat T_u^{\rm net}(\pi_u)+
+\lambda_r\sum_{e\in\pi_u}\frac{1}{1+m_{u,e}/t_{\rm ref}}+
+\lambda_l\sum_{e\in\pi_u}\frac{B_e^{\rm tx}[n]}{D_u}.
 $$
 
-where $\mathcal U_{\rm cmp}\subseteq\mathcal U_{\rm eval}$. Mean completion delay is undefined when there are no completed tasks. It is reported together with completion, deadline-violation, route-failure, and censoring rates, since completed-task delay alone can favor a policy that fails difficult tasks.
+Here $m_{u,e}$ is the remaining covered contact interval after predicted sending, $t_{\rm ref}=1$ s, and $B_e^{\rm tx}[n]$ is current transmitting backlog. Coefficients $\lambda_r,\lambda_l$ have units of seconds. These preference penalties are not additional realized physical delays. The risk term is disabled without future snapshots.
 
-When a warmup period is used, the arrival cohort is restricted to the common admission window after warmup, and those tasks are followed through the drain period. Resource utilization is measured over the same fixed admission window for every policy.
+A bounded time-dependent path-label search returns the best complete route visited within the expansion budget. It is not claimed to be globally optimal or an exact CGR solver; budget exhaustion is recorded. Prediction calendars are seeded from active tasks and previously processed tasks in the same batch. Predicted CPU bookings start after data arrival. Calendars do not reserve actual fluid-shared resources.
 
-## G. Contact-Window Prediction and Batch Competition
+Before selection, a basic node mask enforces current reachability within $H_c$ shortest-path hops and optionally the optimistic necessary condition $W_u/F_s\le\tau_u$. This ignores transport and competition and provides no safety certificate. If all nodes are excluded, the source is restored and flagged. After routing, contact coverage and calendar-based completion are checked. If routing fails or predicted completion exceeds the deadline, execution falls back to the source, with requested node and rejection reason retained. Local execution may still miss its deadline.
 
-### G.1 Legacy prediction and workload proxies
+## D. Store-and-Forward and Shared Computation
 
-At slot $n$, the controller can inspect the current snapshot and up to $H$ future snapshots. For $H>0$, the prediction cache covers intervals up to
+Each hop sends the complete $D_u$-bit input. For tasks currently sending on link $e$, denoted $\mathcal T_e(t)$,
 
 $$
-t_n^{\rm cov}=\min\{n+H+1,N_{\rm trace}\}\delta t,
+\sum_{u\in\mathcal T_e(t)}r_{u,e}(t)\le R_e(t),\qquad r_{u,e}(t)\ge0.
 $$
-
-where $N_{\rm trace}$ is the number of available snapshots. This expression accounts for the fact that each snapshot describes a full half-open slot interval. Setting $H=0$ disables future checking and retains current-snapshot estimates.
-
-For candidate path $\pi(c)$, each hop initially uses reference rate $\eta_R R_e[n]$, where $\eta_R\in(0,1]$. The predicted transmission interval is checked against every covered snapshot that it intersects. If capacities decrease, the reference rate is reduced to $\eta_R$ times the minimum checked capacity, and the expanded interval is checked again until the rate stabilizes or an unavailable link is detected. For a hop without detected link loss, its prediction is
 
-$$
-\widehat t_{u,e}^{\rm tx}=\frac{D_u}{\widehat r_{u,e}},\qquad
-\widehat p_e=\frac{d_e[n]}{c_0}.
-$$
+Both directions share one undirected ISL budget. Only the current hop consumes realized capacity. A contact loss while transmitting terminates the task as a physical route failure; planning rejection is a separate event.
 
-Hop start times are propagated recursively according to store-and-forward operation. The resulting route estimate is
+For tasks whose inputs have arrived and which are computing at satellite $s$, denoted $\mathcal K_s(t)$,
 
 $$
-\widehat T_{u,c}^{\rm net}=
-\sum_{e\in\pi(c)}\left(\widehat t_{u,e}^{\rm tx}+\widehat p_e\right).
+\sum_{u\in\mathcal K_s(t)}f_{s,u}(t)\le F_s,\qquad f_{s,u}(t)\ge0.
 $$
 
-Only transmission intervals require continued link availability; propagation after the final transmitted bit is excluded from contact checks. Let $\phi_{u,c}$ indicate that no unavailable link was detected in the checked transmission intervals, and let $\chi_{u,c}$ indicate that all predicted transmission intervals were fully covered. Partial coverage is treated as unverified availability, rather than a certified feasible route. These predictions use orbital snapshots and a reference service rate, not future workload realizations.
+Processor sharing gives each active task continuous service, with $\dot w_u(t)=-f_{s,u}(t)$ and $\dot d_u(t)=-r_{u,e}(t)$. CPU service begins only after complete input arrival.
 
-To account for competition within a newly arrived batch, decisions are made sequentially in ascending relative-deadline order, with task identifier used to break ties. Previously selected tasks create virtual workload reservations. Before selecting task $u$, let
+Define $Q_s(t)=\sum_{u\in\mathcal K_s(t)}w_u(t)$ and in-transit committed cycles $I_s(t)$. Ratios $Q_s/F_s$ and $I_s/F_s$ are workload features and prediction inputs. An additional $Q_s/F_s$ FIFO wait must not be added to the event-based completion time.
 
-$$
-V_s^{\rm cpu}(u)=\sum_{v\prec u}\mathbf 1\{s_v^{\star}=s\}W_v,
-\qquad
-V_e^{\rm tx}(u)=\sum_{v\prec u}\mathbf 1\{e\in\pi_v\}D_v.
-$$
+## E. KKT Resource Allocation
 
-Existing transmission demand on link $e$ is
+For a fixed active set, the static surrogate
 
 $$
-B_e^{\rm tx}(t_n)=\sum_{v\in\mathcal A_e^{\rm tx}(t_n)}D_{v,e}^{\rm rem}(t_n),
+\min_{x_u>0}\sum_u\frac{w_u}{x_u},\qquad \sum_ux_u\le C
 $$
 
-where $D_{v,e}^{\rm rem}$ denotes residual bits on the task's current hop. The reservation-aware completion proxy is
+has KKT condition $-w_u/x_u^2+\zeta=0$, yielding
 
 $$
-\begin{aligned}
-\widehat T_{u,c}={}&\widehat T_{u,c}^{\rm net}
-+\frac{Q_{s(c)}(t_n)+\widetilde Q_{s(c)}(t_n)+V_{s(c)}^{\rm cpu}(u)+W_u}{F_{s(c)}}\\
-&+\sum_{e\in\pi(c)}\frac{B_e^{\rm tx}(t_n)+V_e^{\rm tx}(u)}{R_e[n]}.
-\end{aligned}
+x_u^*=C\frac{\sqrt{w_u}}{\sum_v\sqrt{w_v}}.
 $$
 
-The CPU and link workload terms are congestion proxies for decision making. They are not exact processor-sharing waiting times or physical admission reservations. All tasks in the batch are admitted together after the selections have been made.
+For links, use $w_u=D_u,C=R_e(t)$; for CPU, use $w_u=W_u,C=F_s$:
 
-With predictive masking enabled, a candidate is retained when no covered contact loss is detected and its delay proxy meets the deadline. If $\beta\in\{0,1\}$ controls whether unverified future intervals are allowed, the eligibility indicator for $H>0$ is
-
 $$
-m_{u,c}=\phi_{u,c}\,
-\mathbf 1\{\chi_{u,c}=1\text{ or }\beta=1\}\,
-\mathbf 1\{\widehat T_{u,c}\le\tau_u\}.
+r_{u,e}(t)=R_e(t)\frac{\sqrt{D_u}}{\sum_{v\in\mathcal T_e(t)}\sqrt{D_v}},\qquad
+f_{s,u}(t)=F_s\frac{\sqrt{W_u}}{\sum_{v\in\mathcal K_s(t)}\sqrt{W_v}}.
 $$
 
-The legacy configuration allows unverified intervals and records their coverage status. For $H=0$, the future-coverage condition is omitted. Deadline filtering and predictive masking can be disabled separately for controlled comparisons. If every candidate is masked, the local candidate is restored as an explicit fallback. A fallback does not imply that the task can meet its deadline. Likewise, an eligible route may still fail or finish late because realized resource sharing differs from the reference prediction.
+Implementation weights use original task workload. Residual workload determines completion events. Allocation is recomputed on arrivals, transmission/propagation/computation completion and topology changes. Optimality applies to this fixed-set surrogate, not the globally coupled dynamic completion problem. Equal sharing under identical budgets is the resource ablation.
 
-### G.2 Contact windows and temporal reservation screening
+## F. Delay, Outcomes and Objective
 
-In the proposed configuration, consecutive selected-link snapshots form a contact window $w=(e,a_w,b_w,V_w)$ within the visible prediction horizon, where
+For a completed task,
 
 $$
-V_w=\int_{a_w}^{b_w}R_e(t)\,dt.
+T_u=t_u^{\rm done}-t_u=\sum_{e\in\pi_u}T_{u,e}^{\rm tx}+\sum_{e\in\pi_u}T_{u,e}^{\rm prop}+T_u^{\rm cpu}.
 $$
 
-Windows are half-open. A window touching the prediction boundary has an unverified ending, rather than a known physical closing time. Only the configured snapshots are inspected; future task arrivals are never used. The plan follows the contact-plan idea of [CGR](https://ntrs.nasa.gov/citations/20120006508), but no waiting for a disconnected link to reopen is permitted here.
+Stage durations come from realized service; local network terms are zero. Success requires completion by $\tau_u$. By default, a deadline miss is counted once and service continues. Tasks unfinished at drain termination are censored without assigning a fabricated completion delay.
 
-Let $\mathcal R_e$ be the prediction calendar of occupied reference-service intervals on undirected link $e$. For input arrival time $\widehat a_{u,e}$, the predicted last-bit departure is the earliest time satisfying
+For active-task count $A(t)$, holding cost is
 
 $$
-\widehat b_{u,e}=\inf\left\{t\ge\widehat a_{u,e}:\int_{\widehat a_{u,e}}^t
-\eta_R R_e(z)\mathbf 1\{z\notin\mathcal R_e\}\,dz\ge D_u\right\},
+H_n=\int_{t_n}^{t_{n+1}}A(t)\,dt.
 $$
-
-subject to continuous contact availability over $[\widehat a_{u,e},\widehat b_{u,e})$. Busy-reference-service intervals can delay transmission, but a known contact gap cannot be bridged. Snapshot-dependent rates are integrated directly. The next hop starts after departure plus propagation, and propagation does not require continued contact. An uncovered tail is extrapolated using the last visible rate and marked unverified; the recommended configuration excludes such remote candidates when future checking is enabled.
 
-For computing satellite $s(c)$, let $\mathcal R_s^{\rm cpu}$ be its prediction service calendar. CPU service starts at the first free interval after the complete input arrives:
+Let $M_n,J_n,B_n$ denote newly recorded deadline misses, actual contact-loss failures, and rejected requested remote destinations followed by local fallback. Reuse the route penalty for planning rejection to prevent cost-free invalid requests:
 
 $$
-\widehat a_{u,s}^{\rm cpu}=\inf\left\{t\ge\widehat t_{u}^{\rm input}:\left[t,t+W_u/F_s\right)\cap\mathcal R_s^{\rm cpu}=\varnothing\right\},
-\qquad
-\widehat T_{u,c}^{\rm cal}=\widehat a_{u,s}^{\rm cpu}+W_u/F_s-t_u.
+C_n=H_n+\alpha_dM_n+\alpha_f(J_n+B_n),\qquad r_n=-C_n/Z.
 $$
-
-The calendar is initialized from observed residual CPU work and predicted remaining stages of currently transmitting or propagating tasks. Residual bits are used for an ongoing hop, full input size for later hops, and CPU work is booked only after input arrival. CPU-resident work is not counted again as in-flight work. Earlier batch selections then update both calendars before screening the next task.
-
-The contact shield applies the eligibility expression above using calendar-based contact and coverage indicators and $\widehat T_{u,c}^{\rm cal}$ in place of the workload-only proxy. It adds contact-duration and capacity margins to candidate features. The legacy mask and an unmasked policy remain available as controlled alternatives. All-ineligible local fallback is reported separately.
-
-These calendars allocate exclusive reference-service intervals for prediction; the execution engine still uses the fluid processor-sharing rules of Section E. Unknown arrivals and realized sharing can invalidate the prediction. Consequently, the shield is a predictive feasibility mechanism, not a formal safety or deadline guarantee.
-
-### G.3 Variable-size task--candidate policy
 
-The policy applies shared node encoders and shared task--candidate scoring to each candidate, with permutation-invariant mean/max graph pooling. Node identifiers index graph entries but are not learned numerical features. Count summaries are normalized using current constellation size and a fixed per-node training scale; task-size scales remain frozen from training. The same parameter tensors can score different satellite and candidate counts. Both candidate MLP-PPO and GAT-PPO have this structural capability; graph-encoding gains and zero-shot transfer must be established experimentally. Candidate-generation tie-breaking and argmax ties can still affect end-to-end numbering invariance.
+Penalty coefficients have units of seconds; $Z$ is fixed. Planning rejection and physical route failure remain separate metrics. Basic local-mask fallback does not itself count as a physical route failure. Holding cost accumulates active time until completion, failure, dropping or censoring, and is not mean delay conditioned on completion. Every policy uses the same objective definition.
 
-## H. Delay-and-Reliability Objective and Problem Formulation
+Under deterministic routing map $\mathcal R$ and allocation map $\Psi$, the layered problem is
 
-Let $\mathcal A(t)$ denote all active tasks, including transmission, propagation, and computing stages. The slot-level holding cost is
-
-$$
-H_n=\int_{t_n}^{t_{n+1}}|\mathcal A(t)|\,dt.
-$$
-
-Let $M_n$ be the number of newly recorded deadline violations in slot $n$, and let $J_n$ be the number of newly recorded route failures. The per-slot cost and reinforcement-learning reward are
-
 $$
-C_n=\frac{H_n+\alpha_{\rm d}M_n+\alpha_{\rm f}J_n}{Z},
-\qquad r_n=-C_n,
+\text{(P1)}:\quad\min_\theta\mathbb E_{\pi_\theta}\!\left[\sum_{n=0}^{N+N_d-1}\gamma^nC_n\right],
 $$
-
-where $\alpha_{\rm d},\alpha_{\rm f}\ge0$ are penalty coefficients with units of seconds, and $Z>0$ is a fixed normalization constant. The denominator is independent of the policy's number of completions. Thus, tasks contribute delay cost while they remain unfinished, including during slots with no new arrivals.
 
-For task $u$, let $\widehat t_u^{\rm end}$ be its completion or failure time, or $\bar T$ if it is censored. The undiscounted holding cost satisfies
-
 $$
-\sum_{n=0}^{N+N_{\rm d}-1}H_n=
-\sum_{u\in\mathcal U}\left(\widehat t_u^{\rm end}-t_u\right).
+\widetilde s_u\sim\pi_\theta(\cdot\mid\mathcal O_n,u,\text{batch prefix}),\quad
+(s_u^*,\pi_u)=\mathcal R(\mathcal O_n,u,\widetilde s_u),\quad
+(r(t),f(t))=\Psi(\text{active tasks and resource budgets}),
 $$
-
-The right-hand side is aggregate observed sojourn time. It equals aggregate completion delay when every task completes, but remains defined for failed and censored tasks. The two penalties discourage deadline violations and route failures. No additional terminal censoring penalty is assumed.
-
-Let $X=\{x_{u,c}\}$ denote destination-path decisions, $\mathcal F=\{f_{s,u}(t)\}$ CPU allocations, and $\mathcal R=\{r_{u,e}(t)\}$ link allocations. Let $\Pi$ denote a causal routing policy and $\mathcal I_n$ its available information at slot $n$: current system state, the current task batch, and the permitted orbital prediction window. The general stochastic optimization problem is
 
-$$
-\begin{aligned}
-\text{(P1)}:\quad
-\min_{\Pi,\mathcal F,\mathcal R}\quad
-&\mathbb E_{\Pi}\!\left[\sum_{n=0}^{N+N_{\rm d}-1}\gamma^n C_n\right]\\
-\text{s.t.}\quad
-&\sum_{c\in\mathcal C_u[n]}x_{u,c}=1,
-\quad x_{u,c}\in\{0,1\},\quad \forall u\in\mathcal B_n,\\
-&\pi(c)\text{ is a current-graph, loop-free candidate path from }s_u\text{ to }s(c),\\
-&\sum_{u\in\mathcal A_s^{\rm cpu}(t)}f_{s,u}(t)\le F_s,
-\quad f_{s,u}(t)\ge0,\quad \forall s,t,\\
-&\sum_{u\in\mathcal A_e^{\rm tx}(t)}r_{u,e}(t)\le R_e[n(t)],
-\quad r_{u,e}(t)\ge0,\quad \forall e,t,\\
-&f_{s,u}(t)=0\text{ outside the eligible CPU stage},\\
-&r_{u,e}(t)=0\text{ outside the current transmission stage},\\
-&X_n\sim\Pi(\cdot\mid\mathcal I_n),\\
-&\mathcal F\text{ and }\mathcal R\text{ use only information available at service time},\\
-&\text{store-and-forward, service-progress, and terminal-event dynamics hold}.
-\end{aligned}
-$$
+subject to unique execution destination, simple paths, hop bounds and link/CPU budgets. Deadlines are handled by prediction and penalties rather than guaranteed hard constraints. PPO optimizes long-horizon computing placement, the graph router handles transport to the selected node, and KKT handles instantaneous resource allocation. Approximate prediction and finite training do not imply superiority over every heuristic.
 
-Here, $\gamma\in(0,1]$ is the discount factor. With $\gamma=1$, the objective combines aggregate observed sojourn time with reliability penalties. With $\gamma<1$, it is the discounted cost used for policy training and should not be identified with unweighted mean completion delay. If the system empties during the drain period, all subsequent costs are zero.
+## G. Graph Policy and Batch Decisions
 
-Problem (P1) is a dynamic mixed-integer optimization problem. A destination-path decision changes both network demand and future computing demand, while resource sharing changes hop completion times, subsequent service membership, and exposure to topology transitions. Predictive eligibility is therefore a decision aid rather than a hard guarantee that $T_u\le\tau_u$.
+Node features include residual CPU workload, heterogeneous capacity, in-transit cycles, normalized ECI position and source-local batch workload/count. Edge features include distance, capacity, transmitting backlog and forecast availability. Task features include size, complexity, deadline, computing scale and batch position.
 
-In the proposed implementation, resource allocations are restricted to the structured rules in Section E. Writing these rules as $\mathcal F=\Psi_F(X)$ and $\mathcal R=\Psi_R(X)$, the policy-learning problem is
+GAT produces node representations $\mathbf h_s$ and pooled graph representation $\mathbf h_G$. A shared scorer evaluates every satellite:
 
 $$
-\text{(P2)}:\quad
-\min_{\Pi}\ \mathbb E_{\Pi}\!\left[
-\sum_{n=0}^{N+N_{\rm d}-1}\gamma^n
-C_n\big(X,\Psi_F(X),\Psi_R(X)\big)\right],
+\ell_{u,s}=g_\theta(\mathbf h_s,\mathbf h_{s_u},\mathbf h_G,\mathbf h_u,\mathbf z_{u,s}),\qquad
+\pi_\theta(\widetilde s_u=s\mid\mathcal O_n,u)=\frac{\exp(\ell_{u,s})m_{u,s}}{\sum_j\exp(\ell_{u,j})m_{u,j}}.
 $$
-
-subject to the candidate, causality, and execution constraints of (P1). This restriction provides feasible resource allocations while concentrating learning on computing-aware destination-path selection. It motivates the proposed task-conditioned GAT-PPO method, which combines graph encoding, predictive candidate masking, and reservation-aware batch decisions. Graph attention and PPO provide the representation and policy-optimization components, respectively; the resource rules and route predictor remain explicit system mechanisms. [Graph attention networks](https://arxiv.org/abs/1710.10903), [Proximal policy optimization](https://arxiv.org/abs/1707.06347)
-
----
 
-## 写作说明与代码对应（不属于论文正文）
+Here $\mathbf z_{u,s}$ includes CPU/in-transit/prefix workload indicators, exclusive computation time, source-relative distance and shortest current hop count. The policy has no precomputed paths, path ranking or handcrafted completion-time logit prior. IDs index data rather than learned numeric inputs, and output length follows constellation size.
 
-上面的英文正文按当前工程的实际执行语义撰写，可作为论文 System Model 初稿。它没有沿用第一研究点的部分卸载、UAV 可控轨迹、能耗目标或任务优先级，因为这些机制尚未出现在第二研究点的实现中。
+Tasks are processed in deadline/ID order. Each node choice is followed by routing and predictive booking at its actual execution node. Physical time advances only after the complete batch is submitted. PPO stores the requested node's conditional log probability and immutable features/mask; the joint batch ratio corresponds to one physical slot. Router fallback is not a second policy sample.
 
-| 正文内容 | 当前工程对应 | 需要保留的建模边界 |
-| --- | --- | --- |
-| 圆轨道、ECI 坐标、动态选边 | `topology/walker.py`、`topology/graph_builder.py` | 理想化 Walker 场景，不称为真实 TLE/SGP4 轨道验证 |
-| 批量任务、热点混合分布 | `tasks/task_generator.py` | 热点概率是混合权重，热点实际占比还含全网均匀抽样贡献 |
-| 计算目标与完整路径候选 | `routing/candidate_builder.py`、`routing/contact_search.py` | KSP 用参考大小；contact 用实际大小和窗口；均有跳数/数量/搜索预算上限 |
-| 存储转发、传播、CPU 服务、断链失败 | `env/event_engine.py` | 传播不占发送容量；数据完整到达后才能进入 CPU |
-| CPU 与链路平方根分配 | `resource/cpu_allocator.py`、`resource/link_allocator.py` | 原始 workload 决定权重；固定活动集合的静态代理解，不是动态全局最优 |
-| CPU 剩余量与在途承诺量 | `compute/compute_queue.py`、`env/state_builder.py` | $Q/F$ 仅用于估计，不能叠加到仿真完成时延 |
-| 未来发送区间检查 | `network/feasibility.py`、`network/contact_plan.py` | H=0 禁用未来检查；推荐 contact 配置排除覆盖不足的远程候选，不跨断链等待 |
-| 链路与 CPU 时间预约、接触筛选 | `routing/reservations.py`、`agents/features.py` | 预测日历不是实际执行预留，不认证未知竞争下的成功 |
-| 变规模评分与冻结评估 | `models/candidate_scorer.py`、`evaluation/generalization.py` | 权重和训练尺度冻结；评分等变不等于整个搜索过程编号无关 |
-| 批次预约、增强代价、mask 与本地回退 | `agents/features.py`、`agents/ppo_agent.py` | 预约是策略内部代理量，不是执行器的物理预留；回退可能仍然超期 |
-| 持有成本、一次性违约/失败惩罚 | `env/reward.py` | 默认违约后继续服务；reward 不是仅对已完成任务取平均时延 |
-| 完成时延、成功率、censor 与固定窗口 | `env/metrics.py`、`evaluation/` | 完成时延是条件统计，必须同时报告失败和截尾情况 |
+MLP-PPO preserves the same scorer, router and allocation while replacing the graph encoder. Cross-scale evaluation freezes weights and training normalization. Supporting variable output size is a structural property; zero-shot performance requires measured evidence.
 
-当前 `configs/base.yaml` 的主要设置为：24 颗卫星，$\delta t=0.25$ s，CPU 容量 20–100 Gcycles/s，ISL 容量 1 Gbit/s，平均每时隙 12 个任务，热点混合权重 0.3，$H_{\rm c}=3$，$H_{\rm p}=4$，$K=3$，$\eta_R=0.5$，$H=8$，$\beta=1$。这些是目前的实验配置，不能仅凭代码设定将其表述为已经过文献或实测校准的系统参数。$H=8$ 表示读取当前及之后 8 个快照；名义前视长度为 2 s，而完整缓存区间最多覆盖从当前边界起的 2.25 s。
+## H. Configuration and Implementation Alignment
 
-当前惩罚系数为 $\alpha_{\rm d}=\alpha_{\rm f}=2$ s，固定归一化量 $Z=12$，PPO 默认 $\gamma=0.995$。任务保持成本包含所有实际执行槽及 drain 槽，评估指标则按指定到达窗口统计；两者不应混写成同一个指标。
+| Setting | compute24 | contact66 |
+|---|---|---|
+| Walker constellation | 3×8, 24 satellites | 6×11, 66 satellites |
+| Altitude / inclination | 600 km / 53° | 780 km / 80° |
+| ISL task-class budget | 200 Mbit/s | 100 Mbit/s |
+| CPU capacity | 40–100 Gcycles/s | 40–100 Gcycles/s |
+| Input / complexity | 20–60 Mbit / 1000–2000 cycles/bit | 20–60 Mbit / 500–1500 cycles/bit |
+| Arrivals | 4/slot = 16/s | 11/slot = 44/s |
+| Hotspots / mixture | 3 / 0.2 | 8 / 0.2 |
+| Deadline | 2–8 s | 2–8 s |
+| Slot / admission / maximum drain | 0.25 s / 600 s / 300 s | Same |
+| Lookahead / reference fraction | H=16 / 0.5 | Same |
 
-若后续希望声称“直接优化平均完成时延”“严格满足 deadline”或“全局联合优化资源”，需要先改变目标或约束并同步修改实现。现版本更准确的描述是：在统一结构化资源分配下，学习目的计算节点与路由的联合选择，以降低折扣后的任务持有成本及违约、断链惩罚。该目标本身不保证提出的方法优于所有基线，性能结论仍需正式多 seed 实验支持。
+These are two physical scenarios using the same method. Parameters are engineering assumptions rather than measured calibration. Actual hotspot fractions are approximately 0.30 and 0.297. At a representative 70 Gcycles/s, compute24 hotspot load is $16\times0.1\times60/70\approx1.37$ per satellite. Exact seeded heterogeneity and load diagnostics are saved in `calibration.json`.
 
-新推荐配置 `configs/contact_ppo.yaml` 采用 24 星、CPU 40–100 Gcycles/s、任务业务 ISL 200 Mbit/s、输入 20–60 Mbit、每时隙期望 4 个任务、期限 2–8 s、H=16、600 s 到达阶段，并禁止通过未完整覆盖的远程预测。跨规模配置按每星到达率与热点比例缩放；它们是工程假设，不是实测硬件校准。完整参数、消融命令与特征 schema=2 的迁移边界见 [CONTACT_METHOD.md](CONTACT_METHOD.md)。
+| Component | Implementation |
+|---|---|
+| Orbits and exogenous ISLs | `topology/walker.py`, `topology/graph_builder.py` |
+| Node-only learned action | `models/destination_scorer.py`, `agents/ppo_agent.py` |
+| Forecast and selected-node route | `network/contact_plan.py`, `routing/contact_aware_router.py` |
+| Predictive bookings | `routing/reservations.py` |
+| Realized execution and rejection records | `env/event_engine.py`, `routing/action_builder.py` |
+| KKT sharing | `resource/cpu_allocator.py`, `resource/link_allocator.py` |
+| Cost and outcomes | `env/reward.py`, `env/metrics.py` |
 
-外部链接用于计算感知路由、CGR、GAT 和 PPO 的来源说明。具体公式、假设、预测窗口和代价函数以本项目实现为准；论文正式排版时可将链接替换为 BibTeX 引用。
+Training replay seed is fixed at 2026; validation and development comparison use seed 100. Validation reuse is explicitly labeled and is not independent testing. One seed provides no confidence interval. Report completed-task mean/P95 jointly with success, actual route failure, routing rejection and censoring. The `node_greedy` control uses the same predictive router, booking and resources to isolate the contribution of long-horizon learned node placement. Performance conclusions require completed training and consistent comparisons.

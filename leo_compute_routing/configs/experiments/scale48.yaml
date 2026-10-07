@@ -1,9 +1,15 @@
-extends: ../contact_ppo.yaml
+extends: ../ppo.yaml
 topology:
   planes: 6
   sats_per_plane: 8
 tasks:
   arrival_rate_per_slot: 8.0
-  hotspot_satellites: [0, 1, 2, 3, 4, 5]
+  hotspot_satellites:
+  - 0
+  - 1
+  - 2
+  - 3
+  - 4
+  - 5
 reward:
   normalizer: 8.0

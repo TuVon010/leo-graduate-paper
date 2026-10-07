@@ -94,7 +94,7 @@ def run_comparison(config, algorithms, output_directory, topology_cache=None, ta
         "learned_policies": {p.name: getattr(p, "metadata", {}) for p in extra_policies or ()},
         "dependencies": {"numpy": np.__version__, "networkx": nx.__version__, "PyYAML": yaml.__version__},
         "model": "piecewise-snapshot fluid store-and-forward with processor sharing",
-        "candidate_generation": config["routing"].get("candidate_generation", "ksp"),
+        "action_space": "computing_satellite", "router_mode": config["routing"]["mode"],
         "contact_waiting": "no waiting across unavailable contacts",
         "link_duplex": "shared bidirectional budget", "prediction_is_guarantee": False,
         "utilization_window": "fixed post-warmup admission interval; drain excluded",

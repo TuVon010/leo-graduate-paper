@@ -13,7 +13,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs/base.yaml")
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--seeds", type=int, nargs="+", default=[42, 43, 44, 45, 46])
+    parser.add_argument("--seeds", type=int, nargs="+", default=[100])
     parser.add_argument("--algorithms", nargs="+", choices=POLICY_NAMES, default=list(POLICY_NAMES))
     parser.add_argument("--reference", choices=POLICY_NAMES, default="batch_greedy")
     parser.add_argument("--bootstrap-samples", type=int, default=5000)

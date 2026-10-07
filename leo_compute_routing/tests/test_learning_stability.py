@@ -15,9 +15,9 @@ from leo_routing.tasks.task import Task
 
 def stabilized(tiny_config):
     config = deepcopy(tiny_config)
-    config["routing"].update(candidate_generation="contact", lookahead_slots=5)
-    config["rl"] = dict(encoder="gat", hidden_dim=16, device="cpu", shield_mode="contact",
-                        value_scale=100.0, completion_prior_strength=2.0, epochs=1, minibatch_steps=64)
+    config["routing"].update(lookahead_slots=5)
+    config["rl"] = dict(encoder="gat", hidden_dim=16, device="cpu",
+                        value_scale=100.0, epochs=1, minibatch_steps=64)
     return config
 
 
@@ -49,7 +49,7 @@ def test_scaled_critic_keeps_reward_units_and_checkpoint_roundtrip(tiny_config, 
     assert expected[2:] == pytest.approx(actual[2:])
 
 
-def test_zero_residual_matches_contact_greedy_with_prefix_bookings(tiny_config, tmp_path):
+def test_zero_actor_is_uniform_without_handcrafted_prior(tiny_config, tmp_path):
     config = stabilized(tiny_config)
     env = LeoEnv(config, task_trace=((Task(0, 0, 10, 1, 10, 0), Task(1, 0, 30, 1, 10, 0)), (), ()))
     obs, _ = env.reset()
@@ -58,11 +58,13 @@ def test_zero_residual_matches_contact_greedy_with_prefix_bookings(tiny_config, 
         agent.model.scorer.score[-1].weight.zero_()
         agent.model.scorer.score[-1].bias.zero_()
     actions, batch, log, _ = agent.choose_action(obs, deterministic=True)
-    assert actions == make_policy("contact_greedy", config).select(obs)
+    for decision in batch.decisions:
+        logits = agent.model.logits(agent.model.encode(batch.graph), decision)
+        assert torch.equal(logits, torch.zeros_like(logits))
     assert all(d.mask[a] for d, a in zip(batch.decisions, batch.actions))
     assert log == pytest.approx(float(agent.model.evaluate_batch(batch)[0].detach()), abs=1e-5)
-    assert env.engine.jobs == {}  # calendars never modify actual resources
-    rows = run_comparison(config, ["batch_greedy", "contact_greedy"], tmp_path / "compare")
+    assert env.engine.jobs == {}
+    rows = run_comparison(config, ["batch_greedy", "node_greedy"], tmp_path / "compare")
     assert len({r["task_trace_sha256"] for r in rows}) == 1
     assert len({r["cpu_capacities_sha256"] for r in rows}) == 1
 
@@ -76,11 +78,11 @@ def test_invalid_learning_scales_are_rejected(tiny_config, key, value):
         rl_settings(config)
 
 
-def test_legacy_settings_and_outputs_are_retained(tiny_config, tmp_path):
+def test_default_scale_and_checkpoint_roundtrip(tiny_config, tmp_path):
     config = deepcopy(tiny_config)
     config["rl"] = {"hidden_dim": 16, "device": "cpu"}
     agent = PPOAgent(config)
-    assert agent.settings["value_scale"] == 1 and agent.settings["completion_prior_strength"] == 0
+    assert agent.settings["value_scale"] == 100 and "completion_prior_strength" not in agent.settings
     env = LeoEnv(config)
     obs, _ = env.reset()
     expected = agent.choose_action(obs, deterministic=True)

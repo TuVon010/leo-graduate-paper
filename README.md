@@ -1,19 +1,12 @@
-# leo-graduate-paper
+# LEO 卫星边缘计算研究
 
-硕士毕业论文「面向非地面网络边缘计算的通信计算协同优化方法研究」第二研究点：
+第二研究点采用分层协同方法：GAT-PPO 决定计算卫星，预测接触感知图路由决定到该节点的路径，KKT 分配链路和星上 CPU 资源。
 
-**面向动态多 LEO 卫星边缘计算的计算感知路由与资源协同优化方法**
+- [实验工程与运行说明](leo_compute_routing/README.md)
+- [中文系统模型](leo_compute_routing/docs/SYSTEM_MODEL_ZH.md)
+- [英文系统模型](leo_compute_routing/docs/SYSTEM_MODEL.md)
+- [服务器实验命令](leo_compute_routing/docs/SERVER_EXPERIMENTS.md)
+- [研究方案](LEO_research_system_model_and_experiments.md)
+- [工程结构](LEO_experiment_code_architecture.md)
 
-## 仓库内容
-
-| 路径 | 说明 |
-|---|---|
-| `LEO_research_system_model_and_experiments.md` | 研究方案：系统模型、算法设计、实验规划 |
-| `LEO_experiment_code_architecture.md` | 实验工程代码结构设计说明 |
-| `leo_compute_routing/` | 实验仿真工程（动态拓扑 / 任务 / 路由 / 资源分配 / 基线 / 评估），详见其 `README.md` |
-
-## 当前状态
-
-- 已完成：事件驱动 LEO 边缘计算仿真环境、5 种基线策略、消融与敏感性扫描框架、44 项单元测试
-- 进行中：环境参数校准、多 seed 论文级基线实验
-- 规划中：MLP-PPO → GAT-PPO → Feasibility Mask 强化学习实现与实验
+旧联合节点/路径方法和配置已移除，历史实验数据保留。训练使用固定 seed，性能结论需以新版正式训练和一致对照为依据。

@@ -1,7 +1,0 @@
-extends: rl_smoke.yaml
-# Synthetic functional check, not orbital evidence.
-routing:
-  candidate_generation: contact
-  allow_unverified_future: false
-rl:
-  shield_mode: contact

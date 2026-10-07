@@ -1,0 +1,5 @@
+extends: ../ppo.yaml
+tasks:
+  arrival_rate_per_slot: 1.0
+reward:
+  normalizer: 1.0

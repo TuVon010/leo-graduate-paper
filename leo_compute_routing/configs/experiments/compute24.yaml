@@ -1,0 +1,5 @@
+extends: ../ppo.yaml
+tasks:
+  cycles_per_bit:
+  - 1000.0
+  - 2000.0

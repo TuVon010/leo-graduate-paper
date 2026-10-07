@@ -1,4 +1,4 @@
-"""Train candidate MLP-PPO or edge-aware GAT-PPO; no simulator logic here."""
+"""Train satellite-only MLP-PPO or edge-aware GAT-PPO; no simulator logic here."""
 import argparse
 import math
 from datetime import datetime

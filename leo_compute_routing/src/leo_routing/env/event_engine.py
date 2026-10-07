@@ -96,7 +96,7 @@ class EventEngine:
                 raise ValueError("Duplicate task or mismatched action ID")
             if abs(task.arrival_slot * self.trace.slot_seconds - self.now) > TIME_EPS:
                 raise ValueError("Tasks must arrive at their declared slot boundary")
-            if action.path[0] != task.source_sat or action.compute_sat >= self.trace.satellite_count:
+            if action.path[0] != task.source_sat or not 0 <= action.compute_sat < self.trace.satellite_count:
                 raise ValueError("Invalid action source/destination")
             if any(not graph.has_edge(i, j) for i, j in zip(action.path, action.path[1:])):
                 raise ValueError("Action path uses an unavailable current link")
@@ -249,6 +249,9 @@ class EventEngine:
             complete = job.stage == "completed"
             records.append({"task_id": task_id, "arrival_slot": job.task.arrival_slot,
                             "source_sat": job.task.source_sat, "compute_sat": job.action.compute_sat,
+                            "requested_compute_sat": (job.action.compute_sat if job.action.requested_compute_sat is None
+                                                       else job.action.requested_compute_sat),
+                            "routing_rejection_reason": job.action.routing_rejection_reason,
                             "path": list(job.action.path), "hops": job.action.hops,
                             "status": job.stage, "failure_reason": job.failure_reason,
                             "deadline_seconds": job.task.deadline_seconds,

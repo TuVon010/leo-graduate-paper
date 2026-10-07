@@ -108,18 +108,18 @@ def validate_config(config):
             raise ValueError("Hotspot satellite outside constellation")
     if not tasks["hotspot_satellites"] and tasks["hotspot_probability"]:
         raise ValueError("Nonzero hotspot probability needs hotspot satellites")
+    allowed_routing = {"max_compute_hops", "max_path_hops", "lookahead_slots", "path_expansion_limit",
+                       "reference_rate_fraction", "deadline_mask", "allow_unverified_future", "mode",
+                       "contact_risk_weight_seconds", "link_load_weight_seconds"}
+    if set(routing) - allowed_routing:
+        raise ValueError("Unknown or retired routing parameters: %s" % sorted(set(routing) - allowed_routing))
     for key in ("max_compute_hops", "max_path_hops", "lookahead_slots"):
         integer(routing[key], key, 0)
-    for key in ("k_paths", "path_search_limit"):
-        integer(routing[key], key)
     integer(routing["path_expansion_limit"], "path_expansion_limit")
-    if routing["path_backend"] not in ("bounded", "yen"):
-        raise ValueError("routing.path_backend must be bounded or yen")
-    if routing.get("candidate_generation", "ksp") not in ("ksp", "contact"):
-        raise ValueError("routing.candidate_generation must be ksp or contact")
-    if routing["path_search_limit"] < routing["k_paths"]:
-        raise ValueError("path_search_limit must be >= k_paths")
-    number(routing["reference_data_bits"], "reference_data_bits")
+    if routing["mode"] not in ("contact", "snapshot"):
+        raise ValueError("routing.mode must be contact or snapshot")
+    for key in ("contact_risk_weight_seconds", "link_load_weight_seconds"):
+        number(routing[key], key, strict=False)
     number(routing["reference_rate_fraction"], "reference_rate_fraction")
     if routing["reference_rate_fraction"] > 1:
         raise ValueError("reference_rate_fraction must be <= 1")

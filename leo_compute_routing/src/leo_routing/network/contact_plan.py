@@ -164,10 +164,11 @@ class ContactPlan:
             min((h.contact_margin_seconds for h in hops), default=0.0),
             min((h.capacity_margin_bits / task.data_bits for h in hops), default=0.0), tuple(hops))
 
-    def append_hop(self, task, prefix, first, second, rate_fraction):
+    def append_hop(self, task, prefix, first, second, rate_fraction, links=None):
         """Reuse a search label's prefix instead of reintegrating previous hops."""
         start = self.start + prefix.route_seconds
-        hop = self.transmit(first, second, start, task.data_bits, rate_fraction)
+        hop = self.transmit(first, second, start, task.data_bits, rate_fraction,
+                            (links or {}).get(edge_key(first, second), ()))
         capacity = float(self.capacities[self._index(start), first, second])
         return ContactRoutePrediction(hop.arrival - self.start, prefix.topology_feasible and hop.feasible,
             prefix.fully_checked and hop.fully_checked,

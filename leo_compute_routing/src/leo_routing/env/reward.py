@@ -7,4 +7,5 @@ def compute_reward(interval, settings):
     """
     return -(interval["holding_cost_seconds"] +
              settings["deadline_penalty"] * interval["new_deadline_misses"] +
-             settings["route_failure_penalty"] * interval["new_route_failures"]) / settings["normalizer"]
+             settings["route_failure_penalty"] * (interval["new_route_failures"] +
+                                                  interval.get("new_routing_rejections", 0))) / settings["normalizer"]

@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--output", type=Path, default=PROJECT_ROOT / "results/sensitivity")
     parser.add_argument("--parameter", default="tasks.arrival_rate_per_slot")
     parser.add_argument("--values", nargs="+", default=["4", "8", "12", "20"])
-    parser.add_argument("--seeds", nargs="+", type=int, default=[42, 43, 44])
+    parser.add_argument("--seeds", nargs="+", type=int, default=[100])
     parser.add_argument("--algorithms", nargs="+", choices=POLICY_NAMES,
                         default=["local", "computing_aware", "computing_aware_future"])
     parser.add_argument("--set", action="append", default=[])

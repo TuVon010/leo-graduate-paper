@@ -1,7 +1,0 @@
-extends: experiments/walker_coupled.yaml
-# Recommended v2: no-disruption contact search + predictive reservation shield.
-routing:
-  candidate_generation: contact
-  allow_unverified_future: false
-rl:
-  shield_mode: contact

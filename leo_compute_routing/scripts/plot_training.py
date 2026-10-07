@@ -36,8 +36,8 @@ def main():
     figure.savefig(path, dpi=160)
     plt.close(figure)
     print(path.resolve())
-    diagnostics = [("predicted_invalid_action_rate", "Prediction-invalid selection rate"),
-                   ("shield_blocked_probability_mass", "Blocked unmasked probability mass"),
+    diagnostics = [("predicted_invalid_action_rate", "Selected-node routing rejection rate"),
+                   ("blocked_probability_mass", "Blocked unmasked probability mass"),
                    ("route_failure_rate", "Actual route failure rate"),
                    ("deadline_violation_rate", "Actual deadline violation rate")]
     if training and all(metric in training[0] for metric, _ in diagnostics):
@@ -53,7 +53,7 @@ def main():
             axis.grid(alpha=0.2)
             axis.legend()
         figure.tight_layout()
-        path = args.directory / "shield_curve.png"
+        path = args.directory / "routing_curve.png"
         figure.savefig(path, dpi=160)
         plt.close(figure)
         print(path.resolve())

@@ -1,7 +1,7 @@
-# SI units throughout: seconds, metres, bits, CPU cycles.
+# Circular Walker-Delta; task-class service budgets, SI units.
 simulation:
-  seed: 42
-  slots: 240
+  seed: 2026
+  slots: 2400
   slot_seconds: 0.25
   drain_slots: 1200
   drop_at_deadline: false
@@ -16,37 +16,44 @@ topology:
   earth_clearance_m: 10000.0
   max_degree: 4
   crosslink_latitude_limit_deg: 50.0
-  link_capacity_bps: 1.0e+9
+  link_capacity_bps: 200000000.0
   periodic_change_slots: 4
 tasks:
-  arrival_rate_per_slot: 12.0
-  data_bits: [500000.0, 5000000.0]
-  cycles_per_bit: [500.0, 1500.0]
-  deadline_seconds: [0.5, 2.0]
-  hotspot_satellites: [0, 1, 2]
-  # Pilot setting: even a 20 Gcycles/s hotspot has expected local rho < 1.
-  hotspot_probability: 0.3
+  arrival_rate_per_slot: 4.0
+  data_bits:
+  - 20000000.0
+  - 60000000.0
+  cycles_per_bit:
+  - 500.0
+  - 1500.0
+  deadline_seconds:
+  - 2.0
+  - 8.0
+  hotspot_satellites:
+  - 0
+  - 1
+  - 2
+  hotspot_probability: 0.2
 compute:
-  # Effective cycles/s model parameter; not a hardware GFLOPS claim.
-  cpu_cycles_per_second: [2.0e+10, 1.0e+11]
+  cpu_cycles_per_second:
+  - 40000000000.0
+  - 100000000000.0
 evaluation:
   warmup_slots: 0
 resource:
   allocation: sqrt
 routing:
-  candidate_generation: ksp
   max_compute_hops: 3
   max_path_hops: 4
-  k_paths: 3
-  path_backend: bounded
   path_expansion_limit: 100000
-  path_search_limit: 30
-  reference_data_bits: 2000000.0
   reference_rate_fraction: 0.5
-  lookahead_slots: 8
+  lookahead_slots: 16
   deadline_mask: true
-  allow_unverified_future: true
+  allow_unverified_future: false
+  mode: contact
+  contact_risk_weight_seconds: 0.1
+  link_load_weight_seconds: 0.1
 reward:
   deadline_penalty: 2.0
   route_failure_penalty: 2.0
-  normalizer: 12.0
+  normalizer: 4.0

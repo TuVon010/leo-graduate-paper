@@ -12,7 +12,7 @@ from leo_routing.env.event_engine import EventEngine
 from leo_routing.env.leo_env import LeoEnv
 from leo_routing.evaluation.calibration import audit_scenario
 from leo_routing.evaluation.statistics import METRICS, aggregate_seed_results, run_multiseed
-from leo_routing.routing.action_builder import CandidateAction, RoutingAction
+from leo_routing.routing.action_builder import RoutingAction
 from leo_routing.tasks.task import Task
 
 
@@ -24,26 +24,32 @@ def test_batch_bookings_reduce_cpu_herding(tiny_config):
     observation, _ = env.reset()
     def destinations(policy):
         actions = make_policy(policy).select(observation)
-        return [observation.candidates[t.task_id][actions[t.task_id]].action.compute_sat for t in trace[0]]
+        return [actions[t.task_id].compute_sat for t in trace[0]]
     assert destinations("computing_aware") == [1, 1]
     assert destinations("batch_greedy") == [1, 0]
     assert env.engine.jobs == {}  # Virtual bookings cannot mutate runtime state.
     assert np.all(observation.cpu_queue_cycles == 0)
 
 
-def test_batch_link_bookings_change_path():
-    graph = nx.Graph()
-    graph.add_edges_from([(0, 1), (1, 3), (0, 2), (2, 3)], capacity_bps=100)
-    tasks = (Task(0, 0, 100, 1, 3, 0), Task(1, 0, 100, 1, 3, 0))
-    candidates = {t.task_id: tuple(CandidateAction(RoutingAction(t.task_id, 3, path), delay, 0, 0.1,
-                                                 2, 100, True, True, True)
-                                  for path, delay in [((0, 1, 3), 0.1), ((0, 2, 3), 0.2)]) for t in tasks}
-    obs = SimpleNamespace(cpu_capacities=np.full(4, 1e9), active_jobs=(), graph=graph,
-                          tasks=tasks, candidates=candidates)
-    assert make_policy("batch_greedy").select(obs) == {0: 0, 1: 1}
+def test_batch_link_bookings_change_path(tiny_config, trace_factory):
+    from leo_routing.routing.contact_aware_router import ContactAwareRouter
+    from leo_routing.routing.reservations import ReservationCalendar
+    config = deepcopy(tiny_config)
+    config["topology"].update(planes=2, sats_per_plane=3)
+    config["tasks"]["hotspot_satellites"] = [0]
+    config["routing"].update(reference_rate_fraction=1.0, lookahead_slots=5,
+                             contact_risk_weight_seconds=0, link_load_weight_seconds=0)
+    trace = trace_factory(satellites=6, slots=24, edges=((0, 1), (1, 3), (0, 2), (2, 3)))
+    tasks = (Task(0, 0, 100, 1, 10, 0), Task(1, 0, 100, 1, 10, 0))
+    obs, _ = LeoEnv(config, trace, (tasks, (), ()), [1e9] * 6).reset()
+    router, calendar = ContactAwareRouter(config["routing"]), ReservationCalendar.from_observation(obs)
+    first = router.find_route(obs, tasks[0], 3, calendar).action
+    calendar.commit(tasks[0], first)
+    second = router.find_route(obs, tasks[1], 3, calendar).action
+    assert first.path == (0, 1, 3) and second.path == (0, 2, 3)
 
 
-def test_batch_future_deadline_ablation_really_disables_deadline_filter(tiny_config):
+def test_node_greedy_deadline_ablation_really_disables_deadline_filter(tiny_config):
     trace = ((Task(0, 0, 100, 1, 0.1, 0),), (), ())
     choices = []
     for mask in [True, False]:
@@ -52,8 +58,8 @@ def test_batch_future_deadline_ablation_really_disables_deadline_filter(tiny_con
         config["topology"]["link_capacity_bps"] = 1e9
         env = LeoEnv(config, task_trace=trace, cpu_capacities=[100, 200, 1, 1, 1, 1])
         obs, _ = env.reset()
-        actions = make_policy("batch_greedy_future").select(obs)
-        choices.append(obs.candidates[0][actions[0]].action.compute_sat)
+        actions = make_policy("node_greedy").select(obs)
+        choices.append(actions[0].compute_sat)
     assert choices == [0, 1]
 
 
@@ -85,18 +91,17 @@ def test_warmup_excludes_tasks_but_keeps_their_competition(tiny_config):
     assert metrics["mean_completion_delay_s"] > 1  # Warmup job is still sharing this CPU.
 
 
-def test_legacy_audit_and_intrinsic_deadline_bound(trace_factory):
-    config = load_config(ROOT / "configs/legacy_overload.yaml")
+def test_audit_reports_hotspot_load_and_intrinsic_deadline_bound(trace_factory):
+    config = load_config(ROOT / "configs/experiments/compute24.yaml")
+    config["simulation"]["slots"] = 20
     topology = trace_factory(satellites=24, slots=250)
     task = Task(0, 0, 5e6, 1500, 0.5, 0)
-    report = audit_scenario(config, topology, ((task,),), np.full(24, 8e9))
-    assert report["expected_hotspot_task_fraction"] == pytest.approx(0.7375)
-    assert report["expected_local_rho_per_satellite"][0] == pytest.approx(4.05625)
-    assert report["optimistic_intrinsic_deadline_impossible_count"] == 1
-    base = load_config(ROOT / "configs/base.yaml")
-    report = audit_scenario(base, topology, ((task,),), np.full(24, 2e10))
-    assert max(report["expected_local_rho_per_satellite"]) == pytest.approx(0.8525)
+    report = audit_scenario(config, topology, ((task,),), np.full(24, 70e9))
+    assert report["expected_hotspot_task_fraction"] == pytest.approx(0.3)
+    assert report["expected_local_rho_per_satellite"][0] == pytest.approx(16 * 0.1 * 60e9 / 70e9)
     assert report["optimistic_intrinsic_deadline_impossible_count"] == 0
+    report = audit_scenario(config, topology, ((task,),), np.full(24, 8e9))
+    assert report["optimistic_intrinsic_deadline_impossible_count"] == 1
 
 
 def test_paired_seed_bootstrap_preserves_pairing_and_undefined_metrics():

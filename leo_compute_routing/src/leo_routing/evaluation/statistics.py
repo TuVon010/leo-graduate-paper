@@ -13,10 +13,10 @@ from ..utils.io import save_csv, save_json
 from .evaluator import run_comparison
 
 METRICS = ("success_rate", "mean_completion_delay_s", "p95_completion_delay_s",
-           "completion_rate", "deadline_violation_rate", "route_failure_rate", "censored_rate",
+           "completion_rate", "deadline_violation_rate", "route_failure_rate", "routing_rejection_rate", "censored_rate",
            "cpu_utilization", "link_utilization", "mean_queue_cycles", "mean_cost_per_admitted_task_s",
-           "predicted_invalid_action_rate", "fallback_rate", "shield_excluded_fraction",
-           "shield_blocked_probability_mass", "candidate_search_truncated_rate")
+           "predicted_invalid_action_rate", "fallback_rate", "destination_excluded_fraction",
+           "blocked_probability_mass", "route_search_truncated_rate")
 
 
 def bootstrap_interval(values, bootstrap_samples=5000, bootstrap_seed=7301):

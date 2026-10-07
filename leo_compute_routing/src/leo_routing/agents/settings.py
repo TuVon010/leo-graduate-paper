@@ -4,15 +4,13 @@ import math
 DEFAULTS = {
     "encoder": "gat", "hidden_dim": 64, "gat_heads": 4, "gat_layers": 2,
     "use_future": True, "use_mask": True, "use_reservations": True, "time_scale_seconds": 1.0,
-    "shield_mode": "mask",
-    # Defaults retain the behavior of downloaded schema-2 checkpoints.
-    "value_scale": 1.0, "completion_prior_strength": 0.0,
+    "value_scale": 100.0,
     "learning_rate": 3e-4, "gamma": 0.995, "gae_lambda": 0.95, "clip_ratio": 0.2,
     "value_coefficient": 0.5, "entropy_coefficient": 0.01, "max_grad_norm": 0.5,
     "epochs": 4, "minibatch_steps": 16, "target_kl": 0.03,
     "updates": 200, "episodes_per_update": 2, "seed": 2026, "device": "auto", "torch_threads": 1,
-    "train_seeds": list(range(20)), "validation_seeds": list(range(100, 105)),
-    "validation_every": 10, "checkpoint_every": 10,
+    "train_seeds": [2026], "validation_seeds": [100],
+    "validation_every": 5, "checkpoint_every": 10,
 }
 
 
@@ -23,8 +21,6 @@ def rl_settings(config):
     settings = {**deepcopy(DEFAULTS), **deepcopy(supplied)}
     if settings["encoder"] not in ("mlp", "gat"):
         raise ValueError("rl.encoder must be mlp or gat")
-    if settings["shield_mode"] not in ("none", "mask", "contact"):
-        raise ValueError("rl.shield_mode must be none, mask or contact")
     for key in ("hidden_dim", "gat_heads", "gat_layers", "epochs", "minibatch_steps", "updates",
                 "episodes_per_update", "torch_threads", "validation_every", "checkpoint_every"):
         value = settings[key]
@@ -47,9 +43,6 @@ def rl_settings(config):
     entropy = settings["entropy_coefficient"]
     if isinstance(entropy, bool) or not isinstance(entropy, (int, float)) or not math.isfinite(entropy) or entropy < 0:
         raise ValueError("Invalid entropy_coefficient")
-    prior = settings["completion_prior_strength"]
-    if isinstance(prior, bool) or not isinstance(prior, (int, float)) or not math.isfinite(prior) or prior < 0:
-        raise ValueError("completion_prior_strength must be nonnegative and finite")
     for key in ("train_seeds", "validation_seeds"):
         values = settings[key]
         if not isinstance(values, list) or not values or len(set(values)) != len(values) or any(
@@ -66,6 +59,4 @@ def configure_rl_environment(config, settings):
     configured = deepcopy(config)
     if not settings["use_future"]:
         configured["routing"]["lookahead_slots"] = 0
-    if not settings["use_mask"] or settings["shield_mode"] == "none":
-        configured["routing"]["deadline_mask"] = False
     return configured

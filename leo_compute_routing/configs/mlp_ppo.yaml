@@ -1,3 +1,0 @@
-extends: ppo.yaml
-rl:
-  encoder: mlp

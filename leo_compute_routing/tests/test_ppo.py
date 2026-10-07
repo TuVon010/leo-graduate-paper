@@ -51,7 +51,7 @@ def test_all_infeasible_uses_local_fallback(tiny_config):
     obs, _ = env.reset()
     agent = PPOAgent(config)
     actions, batch, log, value = agent.choose_action(obs)
-    assert actions == {0: 0}
+    assert actions[0].is_local and actions[0].compute_sat == 0
     assert batch.decisions[0].fallback
     assert np.count_nonzero(batch.decisions[0].mask) == 1
     assert np.isfinite([log, value]).all()

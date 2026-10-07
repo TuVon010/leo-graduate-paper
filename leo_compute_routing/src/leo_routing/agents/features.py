@@ -7,12 +7,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..network.link_model import edge_key
-from ..routing.reservations import ReservationCalendar
+import networkx as nx
 
-FEATURE_SCHEMA = 2
-NODE_DIM, EDGE_DIM, CONTEXT_DIM, TASK_DIM, CANDIDATE_DIM = 8, 4, 12, 5, 18
-CONTACT_COMPLETION_INDEX = 13  # signed log(1 + calendar completion seconds / time_scale)
+FEATURE_SCHEMA = 3
+NODE_DIM, EDGE_DIM, CONTEXT_DIM, TASK_DIM, DESTINATION_DIM = 8, 4, 12, 5, 7
 
 
 def frozen_array(values, dtype=np.float32):
@@ -39,13 +37,10 @@ class GraphInput:
 class DecisionInput:
     task_id: int
     source: int
-    destinations: np.ndarray
-    path_pool: np.ndarray
     task: np.ndarray
-    candidates: np.ndarray
+    destination_features: np.ndarray
     mask: np.ndarray
     fallback: bool
-    predicted_feasible: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -98,69 +93,31 @@ class FeatureBuilder:
         return GraphInput(frozen_array(nodes), frozen_array(observation.edge_index, np.int64),
                           frozen_array(edges), frozen_array(signed_log(np.asarray(context))))
 
-    def decision_input(self, observation, task, position, reserved_cpu, reserved_links, calendar=None):
-        items = observation.candidates[task.task_id]
-        values = np.array(observation.candidate_features[task.task_id], copy=True)
-        values[:, 1:5] /= self.time_scale
-        values[:, 8] /= self.time_scale
-        extras, pools, destinations, estimates = [], [], [], []
-        calendar = calendar or ReservationCalendar.from_observation(observation)
-        base_link_work = {}
-        for job in observation.active_jobs:
-            if job.stage == "tx":
-                edge = edge_key(*job.path[job.hop:job.hop + 2])
-                base_link_work[edge] = base_link_work.get(edge, 0.0) + job.remaining_bits
-        costs = []
-        for item in items:
-            action = item.action
-            cpu_extra = reserved_cpu[action.compute_sat] / observation.cpu_capacities[action.compute_sat]
-            path_edges = [edge_key(i, j) for i, j in zip(action.path, action.path[1:])]
-            link_extra = sum(reserved_links.get(e, 0.0) / observation.graph.edges[e]["capacity_bps"] for e in path_edges)
-            current_links = sum(base_link_work.get(e, 0.0) / observation.graph.edges[e]["capacity_bps"] for e in path_edges)
-            estimate = calendar.estimate(task, action)
-            estimates.append(estimate)
-            extras.append((cpu_extra / self.time_scale, link_extra / self.time_scale, current_links / self.time_scale,
-                           estimate.completion_seconds / self.time_scale,
-                           estimate.deadline_margin_seconds / self.time_scale,
-                           estimate.route.contact_margin_seconds / self.time_scale,
-                           estimate.route.capacity_margin_ratio, float(estimate.fully_checked)))
-            costs.append(item.estimated_total_seconds + cpu_extra + link_extra + current_links)
-            pool = np.zeros(len(observation.cpu_capacities))
-            pool[list(action.path)] = 1 / len(action.path)
-            pools.append(pool)
-            destinations.append(action.compute_sat)
-        values = np.column_stack((values, extras))
-        indices = [1, 2, 3, 4, 8, 9, 10, 11, 12, 13, 14, 15, 16]
-        values[:, indices] = signed_log(values[:, indices])
-        predicted_feasible = np.asarray([estimate.contact_ok and estimate.deadline_margin_seconds >= -1e-10
-                                        for estimate in estimates], dtype=bool)
-        mask = np.ones(len(items), dtype=bool)
-        fallback = False
-        if self.settings["use_mask"] and self.settings["shield_mode"] != "none":
-            if self.settings["shield_mode"] == "contact":
-                mask = np.asarray([estimate.feasible for estimate in estimates], dtype=bool)
-                fallback = not mask.any()
-            else:
-                mask = np.array(observation.feasibility_masks[task.task_id], dtype=bool)
-                if observation.deadline_mask_enabled:
-                    mask &= np.asarray(costs) <= task.deadline_seconds
-                fallback = task.task_id in observation.fallback_task_ids or not mask.any()
-            if not mask.any():
-                mask[0] = True
+    def decision_input(self, observation, task, position, reserved_cpu):
+        capacities = observation.cpu_capacities
+        count = len(capacities)
+        distances = nx.single_source_shortest_path_length(observation.graph, task.source_sat,
+                                                         cutoff=observation.max_compute_hops)
+        hops = np.array([distances.get(s, observation.max_compute_hops + 1) for s in range(count)])
+        reachable = np.array([s in distances for s in range(count)])
+        exclusive = task.total_cycles / capacities
+        source_position = observation.node_features[task.source_sat, 3:6]
+        spatial = np.linalg.norm(observation.node_features[:, 3:6] - source_position, axis=1)
+        # Workload features are congestion indicators, not added actual FIFO waits.
+        features = np.column_stack((observation.cpu_queue_cycles / capacities / self.time_scale,
+            observation.inflight_cycles / capacities / self.time_scale,
+            reserved_cpu / capacities / self.time_scale, exclusive / self.time_scale,
+            spatial, hops / max(1, observation.max_compute_hops), reachable))
+        features[:, :4] = signed_log(features[:, :4])
+        mask = reachable.copy()
+        if self.settings["use_mask"] and observation.deadline_mask_enabled:
+            mask &= exclusive <= task.deadline_seconds
+        fallback = not mask.any()
+        if fallback:
+            mask[task.source_sat] = True
         task_values = [task.data_bits / self.max_bits, task.cycles_per_bit / self.max_complexity,
                        task.deadline_seconds / self.time_scale,
-                       task.total_cycles / observation.cpu_capacities.mean() / self.time_scale,
+                       task.total_cycles / capacities.mean() / self.time_scale,
                        position / max(1, len(observation.tasks))]
-        return DecisionInput(task.task_id, task.source_sat, frozen_array(destinations, np.int64),
-                             frozen_array(pools), frozen_array(signed_log(np.asarray(task_values))),
-                             frozen_array(values), frozen_array(mask, bool), fallback,
-                             frozen_array(predicted_feasible, bool))
-
-    def book(self, action, task, reserved_cpu, reserved_links, calendar=None):
-        if self.settings["use_reservations"]:
-            reserved_cpu[action.compute_sat] += task.total_cycles
-            for i, j in zip(action.path, action.path[1:]):
-                edge = edge_key(i, j)
-                reserved_links[edge] = reserved_links.get(edge, 0.0) + task.data_bits
-            if calendar is not None:
-                calendar.commit(task, action)
+        return DecisionInput(task.task_id, task.source_sat, frozen_array(signed_log(np.asarray(task_values))),
+                             frozen_array(features), frozen_array(mask, bool), fallback)

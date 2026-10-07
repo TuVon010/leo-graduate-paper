@@ -1,20 +1,28 @@
 extends: base.yaml
 simulation:
   slots: 12
-  drain_slots: 400
+  drain_slots: 80
 topology:
   mode: periodic
   planes: 2
   sats_per_plane: 3
   link_capacity_bps: 100000000.0
 tasks:
-  arrival_rate_per_slot: 3.0
-  hotspot_satellites: [0]
-  hotspot_probability: 0.7
+  arrival_rate_per_slot: 2.0
+  data_bits:
+  - 1000000.0
+  - 3000000.0
+  cycles_per_bit:
+  - 100.0
+  - 300.0
+  hotspot_satellites:
+  - 0
+  hotspot_probability: 0.3
 compute:
-  cpu_cycles_per_second: [1000000000.0, 5000000000.0]
+  cpu_cycles_per_second:
+  - 1000000000.0
+  - 5000000000.0
 routing:
   max_path_hops: 3
-  k_paths: 2
 reward:
-  normalizer: 3.0
+  normalizer: 2.0

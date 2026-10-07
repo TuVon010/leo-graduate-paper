@@ -1,0 +1,12 @@
+extends: ../ppo.yaml
+topology:
+  planes: 3
+  sats_per_plane: 8
+tasks:
+  arrival_rate_per_slot: 4.0
+  hotspot_satellites:
+  - 0
+  - 1
+  - 2
+reward:
+  normalizer: 4.0

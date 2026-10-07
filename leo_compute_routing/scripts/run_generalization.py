@@ -1,4 +1,4 @@
-"""Evaluate frozen variable-candidate policies on named unseen constellations."""
+"""Evaluate frozen satellite-only policies on named unseen constellations."""
 import argparse
 import math
 from datetime import datetime
@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoints", type=Path, nargs="+", required=True)
     parser.add_argument("--configs", type=Path, nargs="+", required=True)
-    parser.add_argument("--seeds", type=int, nargs="+", default=[201, 202, 203, 204, 205])
+    parser.add_argument("--seeds", type=int, nargs="+", default=[301])
     parser.add_argument("--algorithms", nargs="*", choices=POLICY_NAMES, default=["local", "computing_aware", "computing_aware_future"])
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--bootstrap-samples", type=int, default=5000)

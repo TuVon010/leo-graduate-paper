@@ -5,7 +5,6 @@ import numpy as np
 
 from ..config import validate_config
 from ..routing.action_builder import RoutingAction
-from ..routing.candidate_builder import CandidateBuilder
 from ..tasks.task_generator import generate_task_trace
 from ..topology.topology_cache import generate_topology
 from .event_engine import EventEngine
@@ -24,7 +23,7 @@ class LeoEnv:
     """Structured reset/step API for variable-size BATCH actions.
 
     This class deliberately does not claim Gymnasium compliance: observations
-    carry ragged graphs and candidate sets. A later RL adapter can define the
+    carry graphs and node states. A later RL adapter can define the
     matching spaces while all policies retain this common simulator.
     """
     def __init__(self, config, topology=None, task_trace=None, cpu_capacities=None):
@@ -63,7 +62,6 @@ class LeoEnv:
         self.engine = EventEngine(self.topology, self.cpu_capacities,
                                   self.config["resource"]["allocation"],
                                   self.config["simulation"]["drop_at_deadline"], measurement_window)
-        self.builder = CandidateBuilder(self.topology, self.cpu_capacities, self.config["routing"])
         self.slot, self.done, self.slot_metrics = 0, False, []
         self.observation_build_seconds = 0.0
         self.observation = self._observe()
@@ -72,7 +70,7 @@ class LeoEnv:
     def _observe(self):
         started = perf_counter()
         tasks = self.task_trace[self.slot] if self.slot < len(self.task_trace) else ()
-        observation = build_observation(self.engine, tasks, self.slot, self.builder, self.config)
+        observation = build_observation(self.engine, tasks, self.slot, self.config)
         self.observation_build_seconds += perf_counter() - started
         return observation
 
@@ -80,24 +78,21 @@ class LeoEnv:
         if self.engine is None or self.done:
             raise RuntimeError("Call reset before stepping an active episode")
         if not isinstance(actions, dict):
-            raise TypeError("Batch actions must map task_id to candidate index or RoutingAction")
+            raise TypeError("Batch actions must map task_id to RoutingAction or a local source ID")
         tasks, normalized = self.observation.tasks, {}
         if set(actions) != {task.task_id for task in tasks}:
             raise ValueError("Action keys must exactly match the current task batch")
         for task in tasks:
             choice = actions[task.task_id]
-            items = self.observation.candidates[task.task_id]
             if isinstance(choice, RoutingAction):
-                if not any(candidate.action == choice for candidate in items):
-                    raise ValueError("Action is not a current candidate")
                 normalized[task.task_id] = choice
-            elif isinstance(choice, (int, np.integer)) and not isinstance(choice, bool) and 0 <= choice < len(items):
-                normalized[task.task_id] = items[int(choice)].action
+            elif isinstance(choice, (int, np.integer)) and not isinstance(choice, bool) and choice == task.source_sat:
+                normalized[task.task_id] = RoutingAction(task.task_id, task.source_sat, (task.source_sat,))
             else:
-                raise ValueError("Invalid candidate index/action")
-        # Mask use is a POLICY choice, enabling controlled look-ahead ablations.
+                raise ValueError("A remote node must be resolved by the graph router into a RoutingAction")
         self.engine.admit(tasks, normalized)
         interval = self.engine.advance((self.slot + 1) * self.config["simulation"]["slot_seconds"])
+        interval["new_routing_rejections"] = sum(bool(action.routing_rejection_reason) for action in normalized.values())
         reward = compute_reward(interval, self.config["reward"])
         queues = self.engine.queue_cycles()
         metric = {"slot": self.slot, "time_seconds": self.engine.now, "arrivals": len(tasks),
