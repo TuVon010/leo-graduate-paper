@@ -11,3 +11,4 @@ reward:
   normalizer: 5.0
 rl:
   rollout_device: cpu
+  randomize_episodes: true

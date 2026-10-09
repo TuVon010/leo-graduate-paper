@@ -79,6 +79,7 @@ def validate_config(config):
         raise ValueError("topology.mode must be walker or periodic")
     for key in ("altitude_m", "max_isl_distance_m", "link_capacity_bps"):
         number(topo[key], key)
+    number(topo.get("epoch_offset_seconds", 0.0), "epoch_offset_seconds", strict=False)
     number(topo["earth_clearance_m"], "earth_clearance_m", strict=False)
     if topo["earth_clearance_m"] >= topo["altitude_m"]:
         raise ValueError("Earth clearance must be below the orbit altitude")

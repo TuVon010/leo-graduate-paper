@@ -9,7 +9,7 @@
 - [场景与物理参数](docs/SCENARIOS.md)、[实验指标](docs/EXPERIMENTS.md)
 - [当前验证记录](docs/VALIDATION.md)、[历史结果](docs/HISTORICAL_RESULTS.md)
 
-训练固定初始化及任务 seed 2026，验证与开发评估使用同一个 seed 100。控制台显示进度、FPS、主要任务指标、PPO 数值和实际 GPU 使用，并保存完整文本。单 seed 不输出置信区间，验证复用不称为独立测试。
+当前 coupled24 固定全局初始化/训练根 seed 2026，每回合由根 seed 和绝对回合编号生成不同任务、CPU 配置、热点位置及 Walker 起始轨道时刻；GAT 与 MLP 使用相同的回合场景序列。验证与开发评估仍固定 seed 100 和参考轨道历元。控制台显示进度、FPS、主要任务指标、PPO 数值和实际 GPU 使用，并保存完整文本。单 seed 不输出置信区间，验证复用不称为独立测试。
 
 ## 运行
 

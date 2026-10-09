@@ -23,8 +23,10 @@ Here $F_W,h,R_E$ denote the phase factor, orbital altitude, and Earth radius. Wi
 $$
 \nu=\sqrt{\frac{\mu_E}{r_{\rm orb}^3}},\qquad
 T_{\rm orb}=\frac{2\pi}{\nu},\qquad
-\vartheta_{p,j}(t)=\psi_{p,j}+\nu t.
+\vartheta_{p,j}(t)=\psi_{p,j}+\nu(t+t_{\rm epoch}).
 $$
+
+Here $t_{\rm epoch}\ge0$ is the start offset of the observation horizon relative to the orbital reference epoch and is fixed within that horizon. Different offsets describe the same Walker constellation at different orbital times, preserving orbital planes, relative satellite phases, altitude and inclination. The original reference epoch has $t_{\rm epoch}=0$.
 
 Given inclination $i$, the Earth-centered inertial position is
 

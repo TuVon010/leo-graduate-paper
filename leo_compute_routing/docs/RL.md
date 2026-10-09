@@ -11,7 +11,7 @@
 | `agents/features.py` | 任务/图/节点状态，保存批次前缀和节点 mask |
 | `agents/ppo_agent.py` | 节点采样、后置图路由、预约、PPO update、检查点 |
 | `agents/rollout_buffer.py` | 物理时隙 transition 与 GAE |
-| `agents/trainer.py` | 回放、固定 seed、验证选模、进度和保存 |
+| `agents/trainer.py、agents/episode_scenarios.py` | 全局 seed、不同回合场景、公平回放、验证选模、进度和保存 |
 
 GAT 输入每节点 8 维、每有向边 4 维；全局上下文 12 维，任务 5 维，每节点额外决策特征 7 维。没有路径池化或联合动作特征，也没有手工完成时间 logit 先验。固定训练尺度保存在 checkpoint。节点换编号时共享评分等变，argmax 平局与图搜索平局仍可能依赖编号。
 
@@ -38,7 +38,11 @@ python -u scripts/evaluate_ppo.py --checkpoints results/new_gat/best.pt results/
 python scripts/plot_training.py results/new_gat
 ```
 
-上例固定一个训练回放 seed 2026，验证 100，开发评估复用 100。独立测试需改用未参与训练或选模的 seed 并去掉 `--allow-validation-reuse`；目前先做开发比较。主实验批量入口见 [SERVER_EXPERIMENTS.md](SERVER_EXPERIMENTS.md)。
+上例 coupled24 开启 `rl.randomize_episodes=true`。初始化及训练根 seed 固定为 2026，回合数据由根 seed、绝对回合编号和独立随机数域确定：重新生成任务和 CPU，保持热点数量/混合概率而改变热点卫星，并均匀选择一个轨道周期内的起始时刻。Walker 相位关系和物理参数保持不变；不根据连通性或方法表现筛掉回合。GAT、MLP 的同编号回合具有相同任务/CPU/拓扑指纹；模型及动作采样 RNG 不会消耗场景随机数。
+
+`episode_scenarios/episode_*.json` 保存完整回合配置、CPU、根 seed、派生回合 seed、轨道偏移、热点及输入指纹，可重建任务与轨道。checkpoint 保存绝对 `episode_count` 和场景协议版本，恢复按该编号继续生成；无需依赖进程中尚未保存的随机数状态。验证 100 和参考历元保持固定，开发评估复用 100。独立测试需改用未参与训练或选模的 seed 并去掉 `--allow-validation-reuse`；目前先做开发比较。主实验批量入口见 [SERVER_EXPERIMENTS.md](SERVER_EXPERIMENTS.md)。
+
+通用默认 `randomize_episodes=false` 仅用于读取旧固定回放协议；旧场景训练结果不因本次修改而改变。新 coupled24 协议需使用全新目录，不从旧 fixed_replay checkpoint 续训。
 
 `best.pt` 按验证平均 reward 选取，`last.pt` 保存最后状态。恢复保存模型、Adam、采样随机状态与 update 日程；写入新目录，从同一新版配置的 last.pt 增加总 updates。特征 schema=3 与旧 schema=1/2 不兼容；不要恢复旧服务器 20 updates 权重。
 

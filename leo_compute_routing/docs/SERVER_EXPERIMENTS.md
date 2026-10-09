@@ -1,6 +1,8 @@
 # 服务器实验命令
 
-在 `leo_compute_routing/` 下执行。当前先运行 `coupled24`，不默认启动 66 星。PPO 只选择计算卫星，训练初始化及任务回放都固定为 2026，验证与当前开发比较固定为 100。服务器顺序运行 GAT 和 MLP，不会自动启动多 seed 训练。schema=3 权重仍能读取；新物理场景必须从头训练到一个全新的输出根目录，schema=1/2 权重不可恢复。
+在 `leo_compute_routing/` 下执行。当前先运行 `coupled24`，不默认启动 66 星。PPO 只选择计算卫星，初始化及训练场景根 seed 固定为 2026，每回合的任务、CPU、热点和 Walker 起始轨道时刻不同；验证与开发比较仍固定为 100 和参考历元。服务器顺序运行 GAT 和 MLP，并使用相同的逐回合场景序列，不会自动启动多 seed 训练。schema=3 权重仍能读取；新随机化协议必须从头训练到全新目录，不能从旧 fixed_replay checkpoint 续训。
+
+2026-10-09 检查时服务器 `/home` 分区已满，根分区 `/tmp` 仍有约 141 GB 空闲。当前命令将新输出及总日志写入 `/tmp/leo-routing-zhaojunan_25/results/`；该位置用于本轮运行，完成后应迁移到长期存储。释放 `/home` 空间后，也可改回项目的 `results/`。
 
 ## 1. 环境检查与功能检查
 
@@ -28,16 +30,17 @@ python -u scripts/benchmark_training.py --config configs/experiments/coupled24.y
 
 然后训练 40 updates：
 
-代码已在服务器通过 123 项测试，并完成完整时域的测速与场景预检查；已有服务器代码可直接运行下列命令。按冷启动耗时，GAT 与 MLP 各 40 updates 顺序训练约 3–3.5 h，另加基线评估时间；训练改善后可能更快。测速详情和启动指标见 [VALIDATION.md](VALIDATION.md)。不要把微基准倍数当成总耗时倍数。
+回合随机化实现已通过本地与服务器 128 项测试及服务器 CUDA 两回合短检查；既有批量加速已完成服务器完整时域测速。历史固定回放的冷启动估计为 GAT 与 MLP 各 40 updates 顺序训练约 3–3.5 h，另加基线评估时间；新随机回合的难度变化会影响该估计，实际以日志 ETA 为准。详情见 [VALIDATION.md](VALIDATION.md)，不要把微基准倍数当成总耗时倍数。
 
 ```bash
 STAMP=$(date +%Y%m%d_%H%M%S)
-RUN="results/coupled24_${STAMP}"
+RUN="/tmp/leo-routing-zhaojunan_25/results/coupled24_randomized_${STAMP}"
+mkdir -p "$RUN"
 nohup python -u scripts/run_server_experiments.py \
   --suite main --phase both --cases coupled24 \
   --updates 40 --device auto --output "$RUN" \
-  > "coupled24_${STAMP}.log" 2>&1 &
-tail -f "coupled24_${STAMP}.log"
+  > "$RUN/launcher.log" 2>&1 &
+tail -f "$RUN/launcher.log"
 ```
 
 `main` 只在 `coupled24` 独立训练 GAT-PPO 和 MLP-PPO，并在 seed 100 比较 local、shortest_offload、least_load、computing_aware、computing_aware_future、batch_greedy、node_greedy。后者与提出的方法共用接触路由、预约及资源，是区分节点学习收益的必要对照。40 updates 是预实验，不预先认定已收敛。新场景参数和审计见 [SCENARIOS.md](SCENARIOS.md)。
@@ -53,7 +56,7 @@ python -u scripts/run_server_experiments.py --suite main --phase evaluate \
 
 ## 3. 继续到 200 updates
 
-仅能从同一 `coupled24` 场景的 schema=3 `last.pt` 继续；保持场景和学习参数相同，把总 update 数加大，写入新目录。不能把旧 compute24 的 checkpoint 当作新场景的续训起点：
+仅能从同一回合随机化协议的 `coupled24`、schema=3 `last.pt` 继续；保持场景和学习参数相同，把总 update 数加大，写入新目录。回合计数从 checkpoint 恢复，不重新生成第一回合。不能把旧 compute24 或旧 fixed_replay checkpoint 当作新协议的续训起点：
 
 ```bash
 MORE="results/coupled24_200_$(date +%Y%m%d_%H%M%S)"
@@ -115,6 +118,7 @@ RUN/
 │   ├── best.pt / last.pt / update_*.pt
 │   ├── episodes.csv / updates.csv / validation.csv
 │   ├── training_manifest.json / training_summary.json / resolved_config.yaml
+│   ├── episode_scenarios/episode_*.json  每回合配置、CPU、轨道历元与输入指纹
 │   ├── learning_curve.png / routing_curve.png
 │   └── topology.npz
 ├── eval/<suite>/<case>/init_2026/

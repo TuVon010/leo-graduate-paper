@@ -14,7 +14,7 @@ def walker_positions(settings, times):
     phase = 2 * np.pi * member / per_plane + 2 * np.pi * settings["phase_factor"] * plane / count
     radius = EARTH_RADIUS_M + settings["altitude_m"]
     omega = np.sqrt(EARTH_MU / radius ** 3)
-    anomaly = np.asarray(times)[:, None] * omega + phase[None, :]
+    anomaly = (np.asarray(times)[:, None] + settings.get("epoch_offset_seconds", 0.0)) * omega + phase[None, :]
     inclination = np.deg2rad(settings["inclination_deg"])
     ca, sa, cr, sr = np.cos(anomaly), np.sin(anomaly), np.cos(raan), np.sin(raan)
     return radius * np.stack((cr * ca - sr * sa * np.cos(inclination),

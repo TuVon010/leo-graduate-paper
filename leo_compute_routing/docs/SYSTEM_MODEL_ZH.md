@@ -23,8 +23,10 @@ $$
 $$
 \nu=\sqrt{\frac{\mu_E}{r_{\rm orb}^3}},\qquad
 T_{\rm orb}=\frac{2\pi}{\nu},\qquad
-\vartheta_{p,j}(t)=\psi_{p,j}+\nu t.
+\vartheta_{p,j}(t)=\psi_{p,j}+\nu(t+t_{\rm epoch}).
 $$
+
+其中，$t_{\rm epoch}\ge0$ 为观测时域相对轨道参考历元的起始偏移，在一个观测时域内保持固定。不同起始偏移对应同一 Walker 星座在不同轨道时刻的位置，不改变轨道面、卫星间相位关系、高度或倾角；$t_{\rm epoch}=0$ 为原参考历元。
 
 在轨道倾角 $i$ 下，卫星的地心惯性坐标为
 

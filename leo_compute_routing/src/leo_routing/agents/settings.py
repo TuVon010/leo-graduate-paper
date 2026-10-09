@@ -9,7 +9,7 @@ DEFAULTS = {
     "value_coefficient": 0.5, "entropy_coefficient": 0.01, "max_grad_norm": 0.5,
     "epochs": 4, "minibatch_steps": 16, "target_kl": 0.03,
     "updates": 200, "episodes_per_update": 2, "seed": 2026, "device": "auto", "rollout_device": "same", "torch_threads": 1,
-    "train_seeds": [2026], "validation_seeds": [100],
+    "train_seeds": [2026], "validation_seeds": [100], "randomize_episodes": False,
     "validation_every": 5, "checkpoint_every": 10,
 }
 
@@ -32,7 +32,7 @@ def rl_settings(config):
         raise ValueError("hidden_dim must be divisible by gat_heads")
     if isinstance(settings["seed"], bool) or not isinstance(settings["seed"], int) or settings["seed"] < 0:
         raise ValueError("rl.seed must be a nonnegative integer")
-    for key in ("use_future", "use_mask", "use_reservations"):
+    for key in ("use_future", "use_mask", "use_reservations", "randomize_episodes"):
         if not isinstance(settings[key], bool):
             raise ValueError("rl.%s must be boolean" % key)
     for key in ("time_scale_seconds", "learning_rate", "gamma", "gae_lambda", "clip_ratio",
