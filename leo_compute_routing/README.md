@@ -2,9 +2,9 @@
 
 当前采用 **GAT-PPO 选择计算卫星 → 预测接触感知图路由 → KKT 链路/CPU 分配**。强化学习只输出节点，路由在选择后执行；旧联合计算节点—路径方法及其配置已删除，旧结果保留。feature schema=3，旧权重需要重新训练。
 
-- [三层方法与消融定义](docs/METHOD.md)
+- [提出方法初稿：GAT-PPO、接触感知路由、KKT 与训练流程](docs/METHOD.md)
 - [系统模型中文版](docs/SYSTEM_MODEL_ZH.md)、[英文版](docs/SYSTEM_MODEL.md)
-- [中英文系统图与矢量文件](paper_figures/README.md)
+- [物理系统、动态图与方法流程的中英文图及矢量文件](paper_figures/README.md)
 - [服务器完整命令](docs/SERVER_EXPERIMENTS.md)、[环境依赖](docs/ENVIRONMENT.md)
 - [场景与物理参数](docs/SCENARIOS.md)、[实验指标](docs/EXPERIMENTS.md)
 - [当前验证记录](docs/VALIDATION.md)、[历史结果](docs/HISTORICAL_RESULTS.md)
@@ -19,7 +19,7 @@
 python -m pytest -q
 python -u scripts/train_ppo.py --config configs/rl_smoke.yaml --output results/new_smoke
 python -u scripts/run_server_experiments.py --suite main --phase both \
-  --cases compute24 contact66 --updates 40 --output results/new_hierarchical
+  --cases coupled24 --updates 40 --output results/new_coupled24
 ```
 
 每次使用新的输出目录；完整方法、MLP 对照及启发式采用共同任务/CPU/拓扑。40 updates 用于预实验，是否收敛以曲线和冻结比较为准。环境可继续使用现有 `.conda-env`，新架构不新增依赖。
@@ -44,4 +44,6 @@ src/leo_routing/
 
 任务完整输入逐跳转发，ISL 两个方向共享容量；数据到达后才计算。CPU 为处理器共享，Q/F 只作为特征/估计，不能叠加到实际完成时延。路由预测预约不锁定实际资源，仍可能因真实竞争失败或超期。KKT 最优性限于固定活动集合的静态代理。
 
-`compute24` 是计算密集的 24 星场景，`contact66` 是高倾角、较低带宽的 66 星场景，两者使用同一方法。论文需要用 node_greedy 对照检验长期学习价值；短功能检查不证明方法已优于启发式。
+当前先运行 `coupled24`：24 星、70° 倾角、100 Mbit/s 任务业务带宽、20 任务/s、8 s 前视。它提高通信与计算耦合程度，同时保留原有 CPU、任务数据量和期限。`compute24` 保留为原始 24 星控制，66 星及跨规模场景暂不在默认运行范围。
+
+PPO 更新采用真正的图/任务批量计算，仍按一个物理时隙计算联合概率比；采样的自回归顺序不变。新实现可读取 schema=3 权重，但新场景必须重新训练。MLP 对照共享接触路由、预约和 KKT，是图编码消融，不是纯 Vanilla PPO。论文需要用 node_greedy 对照检验学习价值；短功能检查不证明方法已优于启发式。

@@ -45,6 +45,8 @@ def train_ppo(config, output_directory, resume=None, progress=None, log_interval
     if settings["updates"] <= agent.update_count:
         raise ValueError("Target updates must exceed the checkpoint update count")
     report("[DEVICE] " + device_summary(agent.device, config.get("rl", {}).get("device", "auto")))
+    report("[DEVICE SPLIT] rollout=%s PPO_update=%s | synchronized weights after every update" % (
+        agent.rollout_model.device, agent.device))
     report("[TRAIN] model=%s init_seed=%s updates=%s->%s episodes/update=%s router=%s node_mask=%s allocation=%s" % (
         agent.name, settings["seed"], agent.update_count, settings["updates"], settings["episodes_per_update"],
         config["routing"]["mode"], settings["use_mask"], config["resource"]["allocation"]))
@@ -65,6 +67,7 @@ def train_ppo(config, output_directory, resume=None, progress=None, log_interval
               "node_mask": settings["use_mask"], "reservation_is_guarantee": False,
               "torch": str(torch.__version__), "numpy": np.__version__, "python": platform.python_version(),
               "device": str(agent.device), "cuda_runtime": torch.version.cuda,
+              "rollout_device": str(agent.rollout_model.device),
               "gpu": torch.cuda.get_device_name(agent.device) if agent.device.type == "cuda" else None,
               "gpu_used": agent.device.type == "cuda", "cuda_available": torch.cuda.is_available(),
               "log_interval_seconds": log_interval_seconds,
@@ -74,6 +77,7 @@ def train_ppo(config, output_directory, resume=None, progress=None, log_interval
               "train_seeds": settings["train_seeds"], "validation_seeds": settings["validation_seeds"],
               "selection": "maximize mean validation episode reward; never test-set performance",
               "ppo_action": "satellite-only autoregressive batch; summed node log probabilities; one physical-slot ratio",
+              "ppo_evaluation": "packed graph/task minibatches; frozen sampled prefixes; unchanged joint PPO objective",
               "truncation": "environment drain censorship is a terminal finite-horizon outcome, bootstrap=0"})
     report("[SETUP] Saving topology and training manifest ...")
     topology.save(output / "topology.npz")
@@ -151,7 +155,7 @@ def train_ppo(config, output_directory, resume=None, progress=None, log_interval
                        100 * episodes[-1]["predicted_invalid_action_rate"], 100 * episodes[-1]["fallback_rate"],
                        100 * episodes[-1]["destination_excluded_fraction"], episodes[-1]["blocked_probability_mass"],
                        100 * episodes[-1]["route_search_truncated_rate"]))
-        report("[OPTIMIZE] update=%s/%s rollout_steps=%s | PPO optimization starting ..." % (
+        report("[OPTIMIZE] update=%s/%s rollout_steps=%s | packed graph/task PPO optimization starting ..." % (
             next_update, settings["updates"], len(buffer)))
         optimize_started = perf_counter()
         metrics = agent.update(buffer, progress=progress, log_interval_seconds=log_interval_seconds)

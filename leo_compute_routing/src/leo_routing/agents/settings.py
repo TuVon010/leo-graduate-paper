@@ -8,7 +8,7 @@ DEFAULTS = {
     "learning_rate": 3e-4, "gamma": 0.995, "gae_lambda": 0.95, "clip_ratio": 0.2,
     "value_coefficient": 0.5, "entropy_coefficient": 0.01, "max_grad_norm": 0.5,
     "epochs": 4, "minibatch_steps": 16, "target_kl": 0.03,
-    "updates": 200, "episodes_per_update": 2, "seed": 2026, "device": "auto", "torch_threads": 1,
+    "updates": 200, "episodes_per_update": 2, "seed": 2026, "device": "auto", "rollout_device": "same", "torch_threads": 1,
     "train_seeds": [2026], "validation_seeds": [100],
     "validation_every": 5, "checkpoint_every": 10,
 }
@@ -21,6 +21,8 @@ def rl_settings(config):
     settings = {**deepcopy(DEFAULTS), **deepcopy(supplied)}
     if settings["encoder"] not in ("mlp", "gat"):
         raise ValueError("rl.encoder must be mlp or gat")
+    if settings["rollout_device"] not in ("same", "cpu"):
+        raise ValueError("rl.rollout_device must be same or cpu")
     for key in ("hidden_dim", "gat_heads", "gat_layers", "epochs", "minibatch_steps", "updates",
                 "episodes_per_update", "torch_threads", "validation_every", "checkpoint_every"):
         value = settings[key]

@@ -93,11 +93,12 @@ class FeatureBuilder:
         return GraphInput(frozen_array(nodes), frozen_array(observation.edge_index, np.int64),
                           frozen_array(edges), frozen_array(signed_log(np.asarray(context))))
 
-    def decision_input(self, observation, task, position, reserved_cpu):
+    def decision_input(self, observation, task, position, reserved_cpu, distances=None):
         capacities = observation.cpu_capacities
         count = len(capacities)
-        distances = nx.single_source_shortest_path_length(observation.graph, task.source_sat,
-                                                         cutoff=observation.max_compute_hops)
+        if distances is None:
+            distances = nx.single_source_shortest_path_length(observation.graph, task.source_sat,
+                                                             cutoff=observation.max_compute_hops)
         hops = np.array([distances.get(s, observation.max_compute_hops + 1) for s in range(count)])
         reachable = np.array([s in distances for s in range(count)])
         exclusive = task.total_cycles / capacities

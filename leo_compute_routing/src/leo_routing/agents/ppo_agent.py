@@ -4,6 +4,7 @@ import random
 from time import perf_counter
 
 import numpy as np
+import networkx as nx
 import torch
 from torch.nn import functional as F
 
@@ -35,6 +36,11 @@ class PPOAgent:
             raise RuntimeError("CUDA was requested but is unavailable. Use --device auto/cpu in the server runner, "
                                "or --set rl.device=auto/cpu in train_ppo.py.")
         self.model = ActorCritic(self.settings).to(self.device)
+        # A small graph's sequential decisions can be faster on CPU, while
+        # minibatch backpropagation remains on CUDA. No independently trained head.
+        self.rollout_model = (deepcopy(self.model).to("cpu").requires_grad_(False)
+                              if self.settings["rollout_device"] == "cpu" and self.device.type != "cpu"
+                              else self.model)
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.settings["learning_rate"], eps=1e-5)
         self.features = FeatureBuilder(config, self.settings)
         self.rng = np.random.default_rng(seed)
@@ -47,6 +53,7 @@ class PPOAgent:
                          "use_mask": self.settings["use_mask"], "use_reservations": self.settings["use_reservations"],
                          "action_space": "computing_satellite", "feature_schema": FEATURE_SCHEMA,
                          "value_scale": self.settings["value_scale"],
+                         "rollout_device": str(self.rollout_model.device),
                          "router_mode": config["routing"].get("mode", "contact"),
                          "reservation_is_guarantee": False}
 
@@ -57,21 +64,28 @@ class PPOAgent:
 
     @torch.no_grad()
     def choose_action(self, observation, deterministic=False):
-        self.model.eval()
+        model = self.rollout_model
+        model.eval()
         state = self.features.graph_input(observation)
-        encoded = self.model.encode(state)
+        encoded = model.encode(state)
         log_probability = encoded[2] * 0
+        blocked_mass = encoded[2] * 0
         decisions, chosen, actions = [], [], {}
         reserved_cpu = np.zeros_like(observation.cpu_capacities)
         calendar = ReservationCalendar.from_observation(observation)
         router = ContactAwareRouter(observation.routing_settings)
+        hop_distances = {}
         diagnostics = dict(decision_count=0, predicted_invalid_selection_count=0, fallback_count=0,
                            destination_count=0, masked_destination_count=0, blocked_probability_mass_sum=0.0,
                            route_search_truncated_count=0, router_fallback_count=0)
         for position, task in enumerate(sorted(observation.tasks, key=lambda t: (t.deadline_seconds, t.task_id))):
-            decision = self.features.decision_input(observation, task, position, reserved_cpu)
-            logits = self.model.logits(encoded, decision)
-            allowed = self.model.tensor(decision.mask, torch.bool)
+            if task.source_sat not in hop_distances:
+                hop_distances[task.source_sat] = nx.single_source_shortest_path_length(
+                    observation.graph, task.source_sat, cutoff=observation.max_compute_hops)
+            decision = self.features.decision_input(observation, task, position, reserved_cpu,
+                                                   hop_distances[task.source_sat])
+            logits = model.logits(encoded, decision)
+            allowed = model.tensor(decision.mask, torch.bool)
             distribution = Categorical(logits=logits.masked_fill(~allowed, -torch.inf))
             choice = torch.argmax(distribution.logits) if deterministic else distribution.sample()
             destination = int(choice.item())
@@ -83,7 +97,7 @@ class PPOAgent:
             chosen.append(destination)
             if self.settings["use_reservations"]:
                 reserved_cpu[result.action.compute_sat] += task.total_cycles
-                calendar.commit(task, result.action)
+                calendar.commit(task, result.action, result.estimate)
             router_fallback = result.reason in ("no_verified_route", "predicted_deadline")
             diagnostics["decision_count"] += 1
             diagnostics["predicted_invalid_selection_count"] += int(router_fallback)
@@ -91,18 +105,25 @@ class PPOAgent:
             diagnostics["router_fallback_count"] += int(router_fallback)
             diagnostics["destination_count"] += len(decision.mask)
             diagnostics["masked_destination_count"] += int((~decision.mask).sum())
-            diagnostics["blocked_probability_mass_sum"] += float(torch.softmax(logits, -1)[~allowed].sum())
+            blocked_mass += torch.softmax(logits, -1)[~allowed].sum()
             diagnostics["route_search_truncated_count"] += int(result.search_truncated)
+        log_value, critic_value, mass = torch.stack((log_probability, encoded[2], blocked_mass)).cpu().tolist()
+        diagnostics["blocked_probability_mass_sum"] = mass
         self.last_decision_metrics = diagnostics
-        return actions, BatchInput(state, tuple(decisions), tuple(chosen)), float(log_probability.item()), float(encoded[2].item())
+        return actions, BatchInput(state, tuple(decisions), tuple(chosen)), log_value, critic_value
 
     def select(self, observation):
         return self.choose_action(observation, self.deterministic)[0]
 
     @torch.no_grad()
     def value(self, observation):
-        self.model.eval()
-        return float(self.model.encode(self.features.graph_input(observation))[2].item())
+        self.rollout_model.eval()
+        return float(self.rollout_model.encode(self.features.graph_input(observation))[2].item())
+
+    def _sync_rollout_model(self):
+        if self.rollout_model is not self.model:
+            self.rollout_model.load_state_dict(self.model.state_dict())
+        self.rollout_model.eval()
 
     def update(self, buffer, progress=None, log_interval_seconds=10.0):
         if not len(buffer):
@@ -113,6 +134,12 @@ class PPOAgent:
         if policy_steps.any():
             selected = advantages[policy_steps]
             advantages = (advantages - selected.mean()) / max(float(selected.std()), 1e-6)
+        packed = self.model.prepare_rollout([t.batch for t in buffer.transitions])
+        old_logs_all = torch.tensor([t.log_probability for t in buffer.transitions], device=self.device)
+        targets_all = torch.as_tensor(returns, device=self.device)
+        advantages_all = torch.as_tensor(advantages, device=self.device)
+        valid_all = torch.as_tensor(policy_steps, device=self.device)
+        counts_all = torch.tensor([max(1, len(t.batch.decisions)) for t in buffer.transitions], device=self.device)
         statistics = []
         early_stop = False
         last_report = perf_counter()
@@ -122,19 +149,18 @@ class PPOAgent:
                 if start == 0:
                     order = self.rng.permutation(len(buffer))
                 indices = order[start:start + self.settings["minibatch_steps"]]
-                evaluated = [self.model.evaluate_batch(buffer.transitions[i].batch) for i in indices]
-                logs, entropy, values = (torch.stack([result[j] for result in evaluated]) for j in range(3))
-                old_logs = torch.tensor([buffer.transitions[i].log_probability for i in indices], device=self.device)
-                targets = torch.as_tensor(returns[indices], device=self.device)
-                advantage = torch.as_tensor(advantages[indices], device=self.device)
-                valid = torch.as_tensor(policy_steps[indices], device=self.device)
+                logs, entropy, values = self.model.evaluate_minibatch(packed, indices)
+                index_tensor = torch.as_tensor(indices, device=self.device)
+                old_logs, targets = old_logs_all[index_tensor], targets_all[index_tensor]
+                advantage, valid = advantages_all[index_tensor], valid_all[index_tensor]
+                has_policy = bool(policy_steps[indices].any())
                 log_ratio = logs - old_logs
                 ratio = torch.exp(log_ratio.clamp(-20, 20))
-                if bool(valid.any()):
+                if has_policy:
                     unclipped = ratio[valid] * advantage[valid]
                     clipped = ratio[valid].clamp(1 - self.settings["clip_ratio"], 1 + self.settings["clip_ratio"]) * advantage[valid]
                     policy_loss = -torch.minimum(unclipped, clipped).mean()
-                    counts = torch.tensor([max(1, len(buffer.transitions[i].batch.decisions)) for i in indices], device=self.device)
+                    counts = counts_all[index_tensor]
                     entropy_bonus = (entropy[valid] / counts[valid]).mean()
                     approximate_kl = ((ratio[valid] - 1) - log_ratio[valid]).mean()
                     clip_fraction = ((ratio[valid] - 1).abs() > self.settings["clip_ratio"]).float().mean()
@@ -146,7 +172,7 @@ class PPOAgent:
                 if not torch.isfinite(logs).all() or not torch.isfinite(values).all():
                     raise FloatingPointError("Nonfinite PPO outputs")
                 # Stop before applying an update to an already overly shifted batch policy.
-                if bool(valid.any()) and float(approximate_kl.detach()) > self.settings["target_kl"]:
+                if has_policy and float(approximate_kl.detach()) > self.settings["target_kl"]:
                     early_stop = True
                     break
                 raw_value_loss = F.mse_loss(values, targets)
@@ -159,11 +185,13 @@ class PPOAgent:
                 loss.backward()
                 gradient_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.settings["max_grad_norm"], error_if_nonfinite=True)
                 self.optimizer.step()
-                statistics.append({"loss": float(loss.detach()), "policy_loss": float(policy_loss.detach()),
-                                   "value_loss": float(value_loss.detach()), "entropy_per_task": float(entropy_bonus.detach()),
-                                   "approximate_joint_kl": float(approximate_kl.detach()), "clip_fraction": float(clip_fraction.detach()),
-                                   "gradient_norm": float(gradient_norm), "raw_value_loss": float(raw_value_loss.detach()),
-                                   "gradient_clip_scale": min(1.0, self.settings["max_grad_norm"] / max(float(gradient_norm), 1e-12))})
+                names = ("loss", "policy_loss", "value_loss", "entropy_per_task", "approximate_joint_kl",
+                         "clip_fraction", "gradient_norm", "raw_value_loss", "gradient_clip_scale")
+                scale = (self.settings["max_grad_norm"] / gradient_norm.clamp_min(1e-12)).clamp_max(1)
+                numbers = torch.stack((loss.detach(), policy_loss.detach(), value_loss.detach(),
+                    entropy_bonus.detach(), approximate_kl.detach(), clip_fraction.detach(),
+                    gradient_norm.detach(), raw_value_loss.detach(), scale.detach())).cpu().tolist()
+                statistics.append(dict(zip(names, numbers)))
                 now = perf_counter()
                 if progress and now - last_report >= log_interval_seconds:
                     last_report = now
@@ -175,6 +203,7 @@ class PPOAgent:
                 break
         self.update_count += 1
         self.model.eval()
+        self._sync_rollout_model()
         keys = ("loss", "policy_loss", "value_loss", "raw_value_loss", "entropy_per_task", "approximate_joint_kl",
                 "clip_fraction", "gradient_norm", "gradient_clip_scale")
         metrics = {key: float(np.mean([row[key] for row in statistics])) if statistics else 0.0 for key in keys}
@@ -209,6 +238,7 @@ class PPOAgent:
                              "Retrain the satellite-only policy with feature schema 3.")
         agent = cls(payload["config"], device)
         agent.model.load_state_dict(payload["model"])
+        agent._sync_rollout_model()
         agent.update_count = payload["update_count"]
         if restore_optimizer:
             agent.optimizer.load_state_dict(payload["optimizer"])

@@ -40,6 +40,50 @@ def test_future_check_covers_transmission_not_only_arrival(trace_factory):
     assert snapshot.topology_feasible and not snapshot.fully_checked
 
 
+def test_bounded_search_pruning_matches_exhaustive_contact_score(trace_factory, tiny_config):
+    import numpy as np
+    rng = np.random.default_rng(19)
+    config = deepcopy(tiny_config)
+    config["routing"].update(reference_rate_fraction=.8, lookahead_slots=10,
+        contact_risk_weight_seconds=.1, link_load_weight_seconds=.1)
+    for trial in range(8):
+        edges = [(i, i + 1) for i in range(5)] + [(0, 2), (2, 5)]
+        edges += [(i, j) for i in range(6) for j in range(i + 2, 6) if rng.random() < .4]
+        trace = trace_factory(satellites=6, slots=24, edges=tuple(edges), propagation_seconds=.01)
+        obs, _ = LeoEnv(config, trace, ((), (), ()), [1000] * 6).reset()
+        calendar = ReservationCalendar.from_observation(obs)
+        calendar.links[(0, 1)] = [(0., .25)]
+        task = Task(trial, 0, 40 + 10 * trial, 1, 30, 0)
+        target = 5
+        possible = []
+        for path in nx.all_simple_paths(obs.graph, 0, target, cutoff=config["routing"]["max_path_hops"]):
+            prediction = calendar.plan.predict(task, path, calendar.rate_fraction, calendar.links)
+            if prediction.topology_feasible and prediction.fully_checked:
+                risk = sum(1 / (1 + max(0, h.contact_margin_seconds)) for h in prediction.hops)
+                possible.append((prediction.route_seconds + .1 * risk, len(path), tuple(path)))
+        result = ContactAwareRouter(config["routing"]).find_route(obs, task, target, calendar)
+        assert possible
+        expected = min(possible)
+        assert result.action.path == expected[2]
+        assert result.cost_seconds == pytest.approx(expected[0])
+        assert not result.search_truncated
+
+
+def test_resolved_calendar_estimate_is_reused_before_commit(trace_factory, tiny_config, monkeypatch):
+    config = deepcopy(tiny_config)
+    config["routing"].update(reference_rate_fraction=1., lookahead_slots=10)
+    trace = trace_factory(satellites=6, slots=24, edges=((0, 1),))
+    obs, _ = LeoEnv(config, trace, ((), (), ()), [1000] * 6).reset()
+    calendar = ReservationCalendar.from_observation(obs)
+    task = Task(0, 0, 50, 1, 10, 0)
+    result = ContactAwareRouter(config["routing"]).resolve(obs, task, 1, calendar)
+    assert result.estimate == calendar.estimate(task, result.action)
+    monkeypatch.setattr(calendar, "estimate", lambda *args: pytest.fail("Committed estimate was recomputed"))
+    committed = calendar.commit(task, result.action, result.estimate)
+    assert committed == result.estimate
+    assert calendar.cpu[1] == [result.estimate.cpu_interval]
+
+
 def test_future_interval_half_open_and_no_propagation_contact_needed(trace_factory):
     trace = trace_factory(propagation_seconds=0.5, unavailable_slots=(1,))
     checked = ContactPlan.from_trace(trace, 0, 3).predict(Task(0, 0, 100, 1, 10, 0), (0, 1), 1.0)

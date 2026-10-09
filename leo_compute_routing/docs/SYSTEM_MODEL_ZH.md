@@ -1,231 +1,358 @@
 # 系统模型
 
-![LEO 卫星边缘计算系统](../paper_figures/system_model_zh.png)
+![LEO 卫星边缘计算系统](../paper_figures/physical_system_zh.png)
 
-本文考虑一个多低地球轨道（low Earth orbit，LEO）卫星边缘计算系统。卫星集合为 $\mathcal S=\{0,\ldots,S-1\}$，各卫星搭载有效处理能力为 $F_s$ CPU cycles/s 的星上服务器，并通过星间链路（inter-satellite link，ISL）交换任务输入。任务可在源卫星计算，也可卸载到其他卫星。本研究采用三层协同决策：图强化学习选择计算卫星，预测接触感知图路由确定到该卫星的传输路径，闭式优化分配实际链路和 CPU 资源。
+本文考虑由多颗低地球轨道（low Earth orbit，LEO）卫星组成的星上边缘计算系统。卫星集合记为 $\mathcal S=\{0,\ldots,S-1\}$，每颗卫星均搭载星上服务器，并通过星间链路（inter-satellite link，ISL）交换任务输入。该系统面向输入已位于源卫星的处理业务，例如星上采集数据的处理，或已完成地面上行的任务处理。由于任务到达在空间上不均匀、卫星算力存在差异，源卫星可能在其他卫星仍有余量时出现负载积累，因此需要协同决定任务执行位置、传输路径及资源分配。
 
-任务到达阶段包含 $N$ 个时隙，时隙长度为 $\delta t$，起点为 $t_n=n\delta t$。卸载决策在时隙边界执行，任务传输和计算在时隙内按连续时间事件推进。到达阶段结束后，继续运行至多 $N_d$ 个排空时隙；未完成任务的剩余工作量跨时隙保留。逻辑控制器获取当前任务、网络与计算状态，以及长度受限的未来轨道快照，但不能获取未来任务到达。任务输入已位于源卫星；地面接入、结果回传、信令开销与星上能耗暂不计入。
+任务可以在源卫星执行，也可以将完整输入经 ISL 传送到另一颗卫星执行。本文的服务完成点为星上计算结束，不包含地面接入与结果回传。因此，后续时延是星间卸载与星上处理时延，不是包含地面终端收发的全流程业务时延。任务不可拆分，不进行执行中重路由或计算迁移；暂不建模存储容量、星上能耗及控制信令开销。
 
-## A. 卫星轨道与动态 ISL 拓扑
+任务到达阶段包含 $N$ 个时隙，时隙长度为 $\delta t$，边界为 $t_n=n\delta t$。任务在边界集中到达并进行调度，传输、传播和计算则在时隙内按连续时间事件推进。到达结束后，继续排空至所有任务终止或达到最多 $N_d$ 个排空时隙。逻辑控制器可获取当前拓扑、任务与资源状态以及有限轨道前视信息，但不能读取未来任务到达。以下依次建立网络、任务、动态资源与时延、接触窗口及联合优化问题。
 
-采用圆轨道二体运动下的 Walker-Delta 星座。设轨道面数为 $P$、每面卫星数为 $J$，有 $S=PJ$。对于面编号 $p$ 和面内编号 $j$，定义
+## A. 卫星网络与轨道运动模型
+
+采用圆轨道二体运动下的 Walker-Delta 星座。设轨道面数为 $P$，每面卫星数为 $J$，则 $S=PJ$。对面编号 $p$ 和面内编号 $j$，定义
 
 $$
 \Omega_p=\frac{2\pi p}{P},\qquad
-\psi_{p,j}=\frac{2\pi j}{J}+\frac{2\pi F_Wp}{PJ},\qquad
-r=R_E+h,\qquad \nu=\sqrt{\frac{\mu_E}{r^3}}.
+\psi_{p,j}=\frac{2\pi j}{J}+\frac{2\pi F_Wp}{PJ},
+\qquad r_{\rm orb}=R_E+h.
 $$
 
-其中 $F_W$ 为 Walker 相位因子，$h$ 为轨道高度，$R_E$ 为地球半径，$\mu_E$ 为地球引力参数。令 $\vartheta_{p,j}[n]=\psi_{p,j}+\nu t_n$，倾角为 $i$，地心惯性坐标位置为
+其中，$F_W$ 为相位因子，$h$ 为轨道高度，$R_E$ 为地球半径。令 $\mu_E$ 为地球引力参数，平均角速度与轨道周期为
 
 $$
-\mathbf q_{p,j}[n]=r\begin{bmatrix}
-\cos\Omega_p\cos\vartheta_{p,j}[n]-\sin\Omega_p\sin\vartheta_{p,j}[n]\cos i\\
-\sin\Omega_p\cos\vartheta_{p,j}[n]+\cos\Omega_p\sin\vartheta_{p,j}[n]\cos i\\
-\sin\vartheta_{p,j}[n]\sin i
+\nu=\sqrt{\frac{\mu_E}{r_{\rm orb}^3}},\qquad
+T_{\rm orb}=\frac{2\pi}{\nu},\qquad
+\vartheta_{p,j}(t)=\psi_{p,j}+\nu t.
+$$
+
+在轨道倾角 $i$ 下，卫星的地心惯性坐标为
+
+$$
+\mathbf q_{p,j}(t)=r_{\rm orb}
+\begin{bmatrix}
+\cos\Omega_p\cos\vartheta_{p,j}(t)-\sin\Omega_p\sin\vartheta_{p,j}(t)\cos i\\
+\sin\Omega_p\cos\vartheta_{p,j}(t)+\cos\Omega_p\sin\vartheta_{p,j}(t)\cos i\\
+\sin\vartheta_{p,j}(t)\sin i
 \end{bmatrix}.
 $$
 
-相邻轨道面之间与同一轨道面相邻卫星之间允许建立 ISL。链路需满足最大距离、地球遮挡、终端度数以及跨面纬度限制。设 $d_{ij}[n]=\|\mathbf q_i[n]-\mathbf q_j[n]\|$，链路视距条件为
+实现于各时隙边界采样位置 $\mathbf q_s[n]=\mathbf q_s(t_n)$，据此更新拓扑；相邻边界之间使用分段固定的网络快照。该模型保留轨道驱动的连接变化，同时允许资源服务在快照内连续演化。
+
+允许建立同一轨道面内相邻卫星之间，以及相邻轨道面卫星之间的链路。设 $d_{ij}[n]=\|\mathbf q_i[n]-\mathbf q_j[n]\|$，链路必须满足最大通信距离与地球遮挡约束：
 
 $$
-\min_{\zeta\in[0,1]}\|\mathbf q_i[n]+\zeta(\mathbf q_j[n]-\mathbf q_i[n])\|>R_E+h_{\rm clr}.
+d_{ij}[n]\le d_{\rm ISL}^{\max},\qquad
+\min_{\zeta\in[0,1]}
+\|\mathbf q_i[n]+\zeta(\mathbf q_j[n]-\mathbf q_i[n])\|
+>R_E+h_{\rm clr}.
 $$
 
-优先建立满足条件的面内相邻链路，再将符合条件的跨面链路按距离升序连接，且节点度数不超过 $d_{\max}$。得到当前图 $G[n]=(\mathcal S,\mathcal E[n])$；不补造链路来强制连通。这里的距离贪心是外生 ISL 连接规则，强化学习不改变轨道或连接规则。物理拓扑可预先缓存，但策略仅能看到当前图与规定前视窗口。
-
-每条活动链路 $e=\{i,j\}$ 的任务业务速率预算为 $R_e[n]$，传播时延为 $d_{ij}[n]/c_0$，其中 $c_0$ 为光速。默认使用固定活动链路容量；距离影响连接与传播，而非额外假设无线信道衰落。本模型是轨道近似与业务资源预算模型，不是 TLE/SGP4 传播器或实际在轨硬件仿真。
-
-## B. 任务生成与整任务卸载
-
-时隙 $n$ 的任务批次记为 $\mathcal U[n]$。任务 $u$ 表示为
+其中，$h_{\rm clr}$ 为地球遮挡的安全余量。跨轨链路还满足配置的纬度限制。先连接符合条件的面内相邻卫星，再将符合条件的跨面链路按距离升序接入，并限制每颗卫星的链路度数不超过 $d_{\max}$。得到无向网络快照
 
 $$
-u=(s_u,D_u,C_u,\tau_u,t_u),\qquad W_u=D_uC_u,\qquad t_u=t_n,
+G[n]=(\mathcal S,\mathcal E[n]).
 $$
 
-其中 $s_u$ 为源卫星、$D_u$ 为输入 bit 数、$C_u$ 为 cycles/bit、$\tau_u$ 为相对截止期限，$W_u$ 为总计算量。每时隙到达数服从泊松分布；数据量、计算密度及期限分别在配置范围独立均匀采样。设热点集合为 $\mathcal H$，热点混合概率为 $p_h$，则
+连接规则为给定的物理网络规则，卸载策略不改变轨道或 ISL 连接。网络不额外补造链路以保证连通。活动链路 $e=\{i,j\}$ 的任务业务速率预算记为 $R_e[n]$，默认在连接存在时取配置容量；距离影响连接条件与传播时延，不额外引入无线衰落模型。
+
+## B. 任务到达与整任务卸载模型
+
+令 $\mathcal U[n]$ 为时隙 $n$ 的到达任务集合，$\lambda_{\rm arr}$ 为平均每秒到达数，则
 
 $$
-\Pr(s_u=s)=\frac{1-p_h}{S}+\frac{p_h}{|\mathcal H|}\mathbf1\{s\in\mathcal H\}.
+N_n^{\rm arr}=|\mathcal U[n]|
+\sim \operatorname{Poisson}(\lambda_{\rm arr}\delta t).
 $$
 
-因此热点任务份额包含均匀分量，不能将 $p_h$ 直接当作热点实际份额。各卫星 CPU 容量在每个回放 seed 下采样一次，整段实验保持不变。
+不同到达时隙独立采样。任务到达时刻量化为时隙边界，而非在时隙内部采样连续到达时刻。排空阶段不再生成任务。
 
-定义 $a_{u,s}\in\{0,1\}$ 表示任务最终执行于卫星 $s$，满足
-
-$$
-\sum_{s\in\mathcal S}a_{u,s}=1.
-$$
-
-任务不可拆分，不设置卸载比例。PPO 的随机动作仅为请求的计算卫星 $\widetilde s_u\in\mathcal S$，**不包含路径、不枚举计算节点与路径组合**。选择计算卫星之后，独立图算法求解路径。源卫星也是一个可选计算节点；本地执行路径为 $(s_u)$。
-
-## C. 接触窗口与预测接触感知图路由
-
-控制器可读取当前和之后 $H$ 个拓扑快照，预测覆盖到 $t_n+(H+1)\delta t$，名义前视长度为 $H\delta t$。$H=0$ 表示仅使用当前快照，不读取后续拓扑。链路 $e$ 的接触窗口由连续可用快照合并得到，表示为
+对任务 $u$，定义
 
 $$
-\mathcal C_e[n]=\{[b_{e,k},d_{e,k})\}_k,\qquad
-K_{e,k}=\int_{b_{e,k}}^{d_{e,k}}R_e(t)\,dt.
+\mathcal T_u=(s_u,D_u,C_u,\tau_u,t_u),\qquad
+W_u=D_uC_u,\qquad t_u=t_n,\quad u\in\mathcal U[n],
 $$
 
-窗口右端若正好位于预测边界，不能将其表述为已知实际断链时刻。默认不接受远程传输中超出预测覆盖的区间；允许未知区间的开关需明确标注。预测不使用未来业务到达。
-
-在 PPO 输出 $\widetilde s_u$ 后，图路由器只搜索从 $s_u$ 到该节点的无环路径
+其中，$s_u$ 为源卫星，$D_u$ 为输入数据量（bit），$C_u$ 为计算密度（cycles/bit），$W_u$ 为总计算量（cycles），$\tau_u$ 为相对期限（s）。绝对截止时刻为 $t_u+\tau_u$。当前业务参数采用相互独立的均匀分布：
 
 $$
-\pi_u=(v_0=s_u,v_1,\ldots,v_{h_u}=\widetilde s_u),\qquad h_u\le H_p.
+D_u\sim\mathcal U(D_{\min},D_{\max}),\qquad
+C_u\sim\mathcal U(C_{\min},C_{\max}),\qquad
+\tau_u\sim\mathcal U(\tau_{\min},\tau_{\max}).
 $$
 
-搜索基于当前图的链路，逐跳计算实际任务大小下的预计发送区间，检查未来快照是否仍有足够接触时间和容量。参考服务速率取 $\eta_R R_e(t)$，$\eta_R\in(0,1]$。设链路预测预约占用集合为 $\mathcal B_e$，则一跳需满足
+设热点卫星集合为 $\mathcal H$，热点混合概率为 $p_h$，源卫星分布为
 
 $$
-\int_{\widehat b_{u,e}}^{\widehat d_{u,e}}
-\eta_R R_e(t)\mathbf1\{t\notin\mathcal B_e\}\,dt\ge D_u,
+\Pr(s_u=s)=\frac{1-p_h}{S}
++\frac{p_h}{|\mathcal H|}\mathbf1\{s\in\mathcal H\}.
 $$
 
-且发送区间内链路连续可用。发送完成后经历传播时延，随后才开始下一跳；传播过程不要求前一条链路继续可用。本实现允许参考预约造成的发送延后，但**不跨越已知断链等待下一次接触，不进行执行中重路由**。
-
-路径评分为
+热点实际任务份额为 $p_h+(1-p_h)|\mathcal H|/S$，包含均匀到达分量。卫星计算容量在系统初始化时独立采样一次：
 
 $$
-J_{\rm route}(\pi_u)=\widehat T_u^{\rm net}(\pi_u)
-+\lambda_r\sum_{e\in\pi_u}\frac{1}{1+m_{u,e}/t_{\rm ref}}
-+\lambda_l\sum_{e\in\pi_u}\frac{B_e^{\rm tx}[n]}{D_u},
+F_s\sim\mathcal U(F_{\min},F_{\max}),
 $$
 
-其中 $m_{u,e}\ge0$ 为预测发送完成后剩余的已覆盖接触窗口长度，$t_{\rm ref}=1$ s，$B_e^{\rm tx}[n]$ 为当前正在该链路发送的任务剩余 bit 数。$\lambda_r,\lambda_l$ 的单位为 s；风险和拥塞项是路由偏好，不额外计入真实物理时延。无未来信息时风险项关闭。
+并在该次运行中保持不变。$F_s$ 表示有效 CPU cycles/s，与 GFLOPS 不直接等价。上述分布和资源预算是可复现的仿真假设，尚不代表实测业务分布或硬件标定。
 
-图算法采用时间相关的有界路径标签搜索，返回扩展预算内已找到的最佳完整路径；不声称所有情形下的全局最优或精确 CGR。搜索被截断时单独记录。链路预测日历由现有活动任务和同批次此前决策建立，CPU 预约在数据预计到达后开始；预约仅用于预测，不改变真实资源共享。
-
-PPO 输出前只做节点级基本筛选：当前图最短跳数不超过 $H_c$，并可选地剔除独占最快执行都无法满足期限的节点，即 $W_u/F_s>\tau_u$。该下界忽略传输和竞争，不是安全保证。所有节点被筛掉时恢复源节点并标记回退。图路由完成后再检查接触覆盖和预约完成时间。无可用路径或预测无法按期完成时，实际执行节点回退为 $s_u$；保留原请求节点与回退原因。本地任务仍可能超期。
-
-## D. 存储转发与计算共享
-
-链路采用整输入存储转发，每跳传输 $D_u$ bit。设 $\mathcal T_e(t)$ 为正在链路 $e$ 发送的任务集合，其分配速率为 $r_{u,e}(t)$，满足
+任务完整地执行于一颗卫星。定义实际执行关联
 
 $$
-\sum_{u\in\mathcal T_e(t)}r_{u,e}(t)\le R_e(t),\qquad r_{u,e}(t)\ge0.
+a_{u,s}\in\{0,1\},\qquad
+\sum_{s\in\mathcal S}a_{u,s}=1,
 $$
 
-同一条无向 ISL 的两个方向共享一个容量预算；不将两个方向各自计算为完整容量。任务只占用当前跳，未开始的后续跳不占实际链路资源。在发送阶段链路断开会终止任务并记录路由失败；预测拒绝与实际断链失败分开统计。
-
-设 $\mathcal K_s(t)$ 为数据已到达且正在卫星 $s$ 计算的任务集合，分配 CPU 速率为 $f_{s,u}(t)$，满足
+并以 $s_u^*$ 表示满足 $a_{u,s_u^*}=1$ 的计算卫星。传输路径为
 
 $$
-\sum_{u\in\mathcal K_s(t)}f_{s,u}(t)\le F_s,\qquad f_{s,u}(t)\ge0.
+\mathcal P_u=(v_{u,0},\ldots,v_{u,h_u}),\qquad
+v_{u,0}=s_u,\quad v_{u,h_u}=s_u^*.
 $$
 
-CPU 采用处理器共享，各活动任务持续获得服务。计算剩余量满足 $\dot w_u(t)=-f_{s,u}(t)$，当前跳剩余 bit 满足 $\dot d_u(t)=-r_{u,e}(t)$。只在数据完整到达计算卫星后启动 CPU 服务。
+本地执行对应 $s_u^*=s_u$、$h_u=0$。远程路径无环，提交时各边属于当前图，跳数不超过 $H_p$。路径上的中继只转发输入，全部计算在 $s_u^*$ 进行。
 
-令 $Q_s(t)=\sum_{u\in\mathcal K_s(t)}w_u(t)$，在途承诺计算量为 $I_s(t)$。$Q_s/F_s$ 和 $I_s/F_s$ 用于负载特征与预测；不能在事件仿真完成时延上再叠加一个 $Q_s/F_s$ 排队项。该模型不是 FIFO 串行队列。
+## C. 动态资源共享模型
 
-## E. KKT 闭式资源分配
-
-固定一个当前活动集合，考虑静态代理子问题
+每条 ISL 使用一个无向容量预算，两个传输方向共同消耗该预算。设 $\mathcal T_e(t)$ 为时刻 $t$ 正在链路 $e$ 发送的任务集合，任务获得速率 $r_{u,e}(t)$，则
 
 $$
-\min_{x_u>0}\sum_u\frac{w_u}{x_u},\qquad
-\text{s.t.}\ \sum_ux_u\le C.
+\sum_{u\in\mathcal T_e(t)}r_{u,e}(t)\le R_e(t),\qquad
+r_{u,e}(t)\ge0.
 $$
 
-由 KKT 条件 $-w_u/x_u^2+\zeta=0$ 得
+其中，$R_e(t)=R_e[n]$，$t\in[t_n,t_{n+1})$；不可用链路的容量为零。$u\notin\mathcal T_e(t)$ 时令 $r_{u,e}(t)=0$。任务只占用当前跳的实际发送资源，后续跳不提前占用真实容量，传播阶段也不占用发送容量。
+
+设 $\mathcal K_s(t)$ 为输入已完整到达且正在卫星 $s$ 计算的任务集合。分配 CPU 速率 $f_{s,u}(t)$ 满足
 
 $$
-x_u^*=C\frac{\sqrt{w_u}}{\sum_v\sqrt{w_v}}.
+\sum_{u\in\mathcal K_s(t)}f_{s,u}(t)\le F_s,\qquad
+f_{s,u}(t)\ge0.
 $$
 
-链路代入 $w_u=D_u,C=R_e(t)$；CPU 代入 $w_u=W_u,C=F_s$，得到
+若 $u\notin\mathcal K_s(t)$，则 $f_{s,u}(t)=0$。当前执行机制为处理器共享：活动发送任务与计算任务同时服务，分配在活动集合或拓扑发生变化时更新。它不是逐任务 FIFO 串行执行。
+
+令 $d_u^{\rm rem}(t)$ 为当前跳剩余 bit，$w_u^{\rm rem}(t)$ 为剩余 cycles。在对应服务阶段，
 
 $$
-r_{u,e}(t)=R_e(t)\frac{\sqrt{D_u}}{\sum_{v\in\mathcal T_e(t)}\sqrt{D_v}},\qquad
-f_{s,u}(t)=F_s\frac{\sqrt{W_u}}{\sum_{v\in\mathcal K_s(t)}\sqrt{W_v}}.
+\frac{d}{dt}d_u^{\rm rem}(t)=-r_{u,e}(t),\qquad
+\frac{d}{dt}w_u^{\rm rem}(t)=-f_{s_u^*,u}(t).
 $$
 
-实现使用任务**原始**数据量和计算量作为权重；剩余量只决定完成事件。到达、发送结束、传播结束、计算完成或拓扑变化时重新分配。该解是固定活动集合静态代理问题的最优解，不能称为整个动态网络的联合全局最优。资源消融采用相同预算下的等分分配。
+每跳开始时 $d_u^{\rm rem}$ 重置为 $D_u$，计算开始前 $w_u^{\rm rem}=W_u$。在任意服务区间 $[t_a,t_b]$，剩余量由原剩余量减去分配速率的积分得到；这些剩余量跨时隙保留。
 
-## F. 任务时延、违约与优化目标
+计算驻留工作量、在途承诺计算量与链路发送积压分别定义为
 
-对于完成任务，完成时延为
+$$
+Q_s(t)=\sum_{u\in\mathcal K_s(t)}w_u^{\rm rem}(t),
+$$
+
+$$
+I_s(t)=
+\sum_{\substack{u:\,s_u^*=s\\u\text{ 处于发送或传播阶段}}}
+w_u^{\rm rem}(t),\qquad
+B_e^{\rm tx}(t)=\sum_{u\in\mathcal T_e(t)}d_u^{\rm rem}(t).
+$$
+
+$I_s$ 不包含已经进入 $\mathcal K_s$ 的任务。$Q_s/F_s$、$I_s/F_s$ 是资源负载的时间尺度，不能作为额外 FIFO 等待时延叠加到真实完成时延。
+
+## D. 存储转发与实际任务时延
+
+输入采用逐跳存储转发，每一跳均发送完整 $D_u$ bit。令 $a_{u,\ell}^{\rm tx}$ 为第 $\ell$ 跳开始发送的时刻，$b_{u,\ell}^{\rm tx}$ 为发送完成时刻，$e_{u,\ell}=\{v_{u,\ell-1},v_{u,\ell}\}$。对成功完成该跳的任务，
+
+$$
+b_{u,\ell}^{\rm tx}=
+\inf\left\{
+t\ge a_{u,\ell}^{\rm tx}:
+\int_{a_{u,\ell}^{\rm tx}}^t r_{u,e_{u,\ell}}(\xi)\,d\xi
+\ge D_u
+\right\}.
+$$
+
+第 $\ell$ 跳传播时延为
+
+$$
+T_{u,\ell}^{\rm prop}
+=\frac{d_{v_{u,\ell-1},v_{u,\ell}}[n_{u,\ell}^{\rm ref}]}{c_0},
+$$
+
+其中，$c_0$ 为光速。$n_{u,\ell}^{\rm ref}$ 取发送完成前最后一个服务区间所在的拓扑快照；发送恰在边界完成时使用边界之前的快照。发送结束后固定该传播时延。
+
+逐跳到达时刻满足
+
+$$
+a_{u,1}^{\rm tx}=t_u,\qquad
+a_{u,\ell+1}^{\rm tx}
+=b_{u,\ell}^{\rm tx}+T_{u,\ell}^{\rm prop}.
+$$
+
+输入到达计算卫星的时刻为
+
+$$
+a_u^{\rm cpu}=
+\begin{cases}
+t_u,&h_u=0,\\
+b_{u,h_u}^{\rm tx}+T_{u,h_u}^{\rm prop},&h_u>0.
+\end{cases}
+$$
+
+仅当输入全部到达时才启动计算。对完成任务，
+
+$$
+t_u^{\rm done}
+=\inf\left\{
+t\ge a_u^{\rm cpu}:
+\int_{a_u^{\rm cpu}}^t f_{s_u^*,u}(\xi)\,d\xi\ge W_u
+\right\}.
+$$
+
+于是
 
 $$
 T_u=t_u^{\rm done}-t_u
-=\sum_{e\in\pi_u}T_{u,e}^{\rm tx}+\sum_{e\in\pi_u}T_{u,e}^{\rm prop}+T_u^{\rm cpu}.
+=\sum_{\ell=1}^{h_u}
+\left(b_{u,\ell}^{\rm tx}-a_{u,\ell}^{\rm tx}
++T_{u,\ell}^{\rm prop}\right)
++t_u^{\rm done}-a_u^{\rm cpu}.
 $$
 
-各阶段持续时间由实际动态共享资源决定，本地任务网络项为零。成功定义为完成且 $T_u\le\tau_u$。默认到期任务只记录一次违约并继续执行；排空结束仍未完成的任务记录为截尾，不伪造完成时间。
+竞争通过时变分配速率影响服务区间长度，因此不再添加独立排队项。任务在发送阶段遭遇断链时终止为路由失败；发送已完成后的传播无需前一链路继续保持可用。上述完成时刻公式不为失败或截尾任务构造虚假完成时间。
 
-设 $A(t)$ 为尚未终止的活动任务数，时隙持有成本为
+按期成功定义为任务完成且 $T_u\le\tau_u$。默认情况下，任务仍活动且达到期限时记录一次违约，随后继续执行；恰在期限完成的任务视为成功。排空上限处仍活动的任务标记为截尾。完成时延仅对完成任务定义；成功、违约、断链失败和截尾描述不同的任务结果。
+
+## E. 资源状态与接触窗口的动态图
+
+将轨道驱动的连接变化和业务驱动的资源变化统一表示为
+
+$$
+\mathcal G(t)=
+\left(\mathcal S,\mathcal E(t),
+\mathbf X_{\mathcal S}(t),\mathbf X_{\mathcal E}(t)\right),
+\qquad n(t)=\lfloor t/\delta t\rfloor.
+$$
+
+节点集合固定为物理卫星，$\mathcal E(t)=\mathcal E[n(t)]$ 随网络快照变化。节点与链路属性分别为
+
+$$
+\mathbf x_s(t)=
+\left(F_s,Q_s(t),I_s(t),\mathbf q_s[n(t)]\right),
+\qquad
+\mathbf x_e(t)=
+\left(R_e(t),d_e[n(t)],B_e^{\rm tx}(t)\right).
+$$
+
+$F_s$ 在单次运行中固定，而 $Q_s,I_s,B_e^{\rm tx}$ 随任务到达、发送、传播和计算完成而变化。因此，同一时刻的可达性由边集合决定，传输与处理持续时间还取决于资源占用；即使两次观察具有相同边集合，任务完成时延也可能不同。
+
+![拓扑与资源状态随时间变化](../paper_figures/dynamic_graph_zh.png)
+
+**图 E-1：动态卫星图的连接与资源状态。** 三个时刻使用相同卫星集合，但活动边不同；节点下方给出计算驻留量 $Q_s$ 和在途量 $I_s$ 的示例。下方进一步说明同一链路和计算节点的活动集合变化如何影响服务。图中连接及数值均为模型示意，不是轨道或实验记录。
+
+对于链路 $e$，将一段观察范围内连续可用的快照合并成接触窗口：
+
+$$
+\mathcal C_e[n]=
+\left\{[\beta_{e,k},\varepsilon_{e,k})\right\}_k,
+\qquad
+K_{e,k}=
+\int_{\beta_{e,k}}^{\varepsilon_{e,k}}R_e(t)\,dt.
+$$
+
+$\beta_{e,k}$ 和 $\varepsilon_{e,k}$ 分别表示窗口起点与终点，$K_{e,k}$ 为该窗口的总业务容量。它是所有共享任务的总预算，不是单个任务可独占的容量。
+
+时隙 $n$ 的轨道信息包括当前及后续 $H$ 个快照；轨道记录足够长时，已知区间为 $[t_n,t_n+(H+1)\delta t)$。只在已知区间内确定接触存在与否；若某窗口延伸至观察边界，该边界表示信息截止，不能认定为真实断链时刻。轨道信息不包含未来任务到达或未来资源占用。
+
+![接触窗口、链路容量与逐跳服务](../paper_figures/contact_windows_zh.png)
+
+**图 E-2：快照可用性对应的接触窗口及输入服务过程。** 上部将逐时隙连接状态合并为连续窗口；窗口中的容量面积为 $\int R_e(t)\,dt$。下部给出同一输入先发送、再传播、再进入下一跳的过程，并对比因接触结束而无法完成发送的情况。图中时间和速率只用于解释模型。
+
+对一个在窗口 $[\beta,\varepsilon)$ 内开始并成功完成发送的任务，第 $\ell$ 跳必须满足
+
+$$
+\beta\le a_{u,\ell}^{\rm tx}
+<b_{u,\ell}^{\rm tx}\le\varepsilon,\qquad
+\int_{a_{u,\ell}^{\rm tx}}^{b_{u,\ell}^{\rm tx}}
+r_{u,e_{u,\ell}}(t)\,dt=D_u.
+$$
+
+由资源容量约束可得必要条件
+
+$$
+D_u\le
+\int_{a_{u,\ell}^{\rm tx}}^\varepsilon
+R_{e_{u,\ell}}(t)\,dt.
+$$
+
+该条件只表示窗口总容量足够；有其他任务共享时，单个任务获得的积分服务仍可能不足。发送结束后的传播可以延伸到该链路接触结束之后；下一跳则必须在其自身的可用窗口中进行。当前拓扑可达不等于整个任务执行期间持续可达。
+
+## F. 系统成本与联合优化问题
+
+令 $\mathcal A(t)$ 为尚未终止的活动任务集合，$A(t)=|\mathcal A(t)|$。时隙持有成本为
 
 $$
 H_n=\int_{t_n}^{t_{n+1}}A(t)\,dt.
 $$
 
-以 $M_n$ 表示本时隙新期限违约数，$J_n$ 表示实际断链失败数，$B_n$ 表示选定远程节点后路由被拒绝并回退的任务数。使用原路由惩罚系数同时约束拒绝行为，以避免策略无成本地反复请求不可执行节点：
+令 $t_u^{\rm term}$ 为任务完成、断链失败或排空截尾时的终止时刻，则
 
 $$
-C_n=H_n+\alpha_dM_n+\alpha_f(J_n+B_n),\qquad r_n=-C_n/Z.
+\sum_nH_n=\sum_u(t_u^{\rm term}-t_u).
 $$
 
-其中 $\alpha_d,\alpha_f$ 单位为 s，$Z$ 为固定归一化常数。本地基本筛选回退本身不计作物理路由失败；$B_n$ 与 $J_n$ 分别保存。持有成本包含完成、断链终止、丢弃或截尾前的全部活动时间，不能称为仅对完成任务的平均时延。所有方法使用相同代价定义。
-
-在确定性的图路由映射 $\mathcal R$ 与资源映射 $\Psi$ 下，分层优化问题写为
+它包含所有任务终止前的驻留时间，不是仅完成任务的平均时延。设 $M_n$ 为本时隙首次记录的期限违约数，$J_n$ 为实际断链失败数，系统成本定义为
 
 $$
-\text{(P1)}:\quad\min_\theta\ \mathbb E_{\pi_\theta}\!\left[\sum_{n=0}^{N+N_d-1}\gamma^nC_n\right],
+C_n^{\rm sys}=H_n+\alpha_dM_n+\alpha_fJ_n.
+$$
+
+$\alpha_d,\alpha_f$ 单位为 s，分别控制对期限违约和服务失败的重视程度。已违约但继续执行的任务仍产生持有成本；若该任务随后断链，也记录实际失败。截尾任务保留其终止前的驻留时间，不构造计算完成时延。
+
+定义执行关联 $A=\{a_{u,s}\}$、路径 $\mathscr P=\{\mathcal P_u\}$、链路速率 $\mathsf R=\{r_{u,e}(t)\}$ 和 CPU 速率 $\mathsf F=\{f_{s,u}(t)\}$。因果决策机制 $\Pi$ 根据可用信息确定这些变量，原始系统问题为
+
+$$
+\text{(P1)}:\quad
+\min_{\Pi\in\mathfrak P_{\rm causal}}
+\mathbb E_\Pi\left[
+\sum_{n=0}^{N+N_d-1}C_n^{\rm sys}
+\right],
 $$
 
 $$
-\widetilde s_u\sim\pi_\theta(\cdot\mid\mathcal O_n,u,\text{批次前缀}),\quad
-(s_u^*,\pi_u)=\mathcal R(\mathcal O_n,u,\widetilde s_u),\quad
-(r(t),f(t))=\Psi(\text{当前活动任务与资源预算}),
+\begin{aligned}
+\text{s.t.}\quad
+&a_{u,s}\in\{0,1\},\qquad \sum_sa_{u,s}=1,\\
+&v_{u,0}=s_u,\quad a_{u,v_{u,h_u}}=1,\quad 0\le h_u\le H_p,\\
+&v_{u,\ell}\ne v_{u,k}\quad(\ell\ne k),\\
+&e_{u,\ell}\in\mathcal E[n_u],\quad \ell=1,\ldots,h_u,\\
+&\sum_{u\in\mathcal T_e(t)}r_{u,e}(t)\le R_e(t),\quad r_{u,e}(t)\ge0,\\
+&\sum_{u\in\mathcal K_s(t)}f_{s,u}(t)\le F_s,\quad f_{s,u}(t)\ge0,\\
+&r_{u,e}(t)=0\ (u\notin\mathcal T_e(t)),\\
+&f_{s,u}(t)=0\ (u\notin\mathcal K_s(t)),\\
+&a_{u,\ell+1}^{\rm tx}
+=b_{u,\ell}^{\rm tx}+T_{u,\ell}^{\rm prop}
+\quad\text{对成功完成的前一跳},\\
+&\text{输入全部到达后计算，剩余工作量按 C、D 节演化},\\
+&\text{执行位置和路径在到达时确定，任务执行中保持不变},\\
+&\Pi\text{ 仅使用当前/历史状态及规定范围内的轨道信息}.
+\end{aligned}
 $$
 
-并满足唯一计算节点、无环路径、跳数限制与通信/计算容量约束。$\gamma$ 为折扣系数。期限采用筛选与违约惩罚，不是所有任务必须满足的硬约束。PPO 优化节点决策的长期代价；图算法处理此刻到该节点的传输；闭式规则处理当前资源分配。训练有限且预测近似，不能预先保证策略优于所有启发式。
+$n_u$ 为到达时隙，所有路径边在提交时存在。之后的可用性仍由轨道决定；发送阶段断链按失败终止，不要求所有已提交路径均能在未来执行成功。若排空提前结束，之后成本按零延拓到上述时域上限。期限通过违约成本表示，不将 $T_u\le\tau_u$ 作为所有任务必须满足的硬约束。
 
-## G. 图强化学习状态与动作
+执行位置与路径是离散变量，服务速率是时变连续变量；当前选择还改变后续资源竞争和驻留工作量。P1 描述这些变量在容量、服务顺序和信息因果性约束下的联合目标。
 
-图节点状态包括当前 CPU 剩余工作量、异构容量、在途计算量、归一化 ECI 坐标、源于该节点的新批次计算量及任务数。边状态包括距离、容量、当前发送积压和预测窗口可用比例。任务状态包括大小、计算密度、期限、独占执行尺度及批次位置。
+## G. 主要符号
 
-GAT 得到节点表示 $\mathbf h_s$，图池化得到全局表示 $\mathbf h_G$。共享评分器对每一个卫星节点计算
-
-$$
-\ell_{u,s}=g_\theta(\mathbf h_s,\mathbf h_{s_u},\mathbf h_G,\mathbf h_u,\mathbf z_{u,s}),\qquad
-\pi_\theta(\widetilde s_u=s\mid\mathcal O_n,u)=\frac{\exp(\ell_{u,s})\,m_{u,s}}{\sum_j\exp(\ell_{u,j})\,m_{u,j}},
-$$
-
-其中 $m_{u,s}$ 为节点基本筛选标记，$\mathbf z_{u,s}$ 包含 CPU、在途及批次前缀承诺量、独占计算时长、源到节点距离与当前最短跳数。策略不输入预先搜索好的路径、路径排名或手工完成时间 logit 先验。卫星 ID 只用于索引，不作为可学习数值特征；共享评分器的输出数量随星座节点数变化。
-
-同批任务按期限、任务 ID 顺序决策。每次节点选择后执行路由预测，再更新实际执行节点的预测预约，供后续任务使用；整个批次提交后物理时间才前进。PPO 保存请求节点的条件概率、采样时特征和掩码，对一个物理时隙使用批次联合概率比，不将路由回退重新当作一次 PPO 采样。
-
-MLP-PPO 保持相同节点评分和后续路由，仅替换图编码器。48→24/72/96 星评估冻结网络权重及训练特征尺度。可变输出结构支持跨规模运行，但不等于已经证明零样本性能优势。
-
-## H. 参数、代码对应与论文表述边界
-
-| 设置 | compute24 | contact66 |
-|---|---|---|
-| Walker 结构 | 3×8，24 星 | 6×11，66 星 |
-| 高度 / 倾角 | 600 km / 53° | 780 km / 80° |
-| ISL 业务容量 | 200 Mbit/s | 100 Mbit/s |
-| CPU | 40–100 Gcycles/s | 40–100 Gcycles/s |
-| 输入 / 计算密度 | 20–60 Mbit / 1000–2000 cycles/bit | 20–60 Mbit / 500–1500 cycles/bit |
-| 到达强度 | 4/时隙，即 16/s | 11/时隙，即 44/s |
-| 热点数量 / 混合概率 | 3 / 0.2 | 8 / 0.2 |
-| 期限 | 2–8 s | 2–8 s |
-| 时隙 / 到达时域 / 排空上限 | 0.25 s / 600 s / 300 s | 同左 |
-| 前视 / 参考速率比例 | H=16 / 0.5 | 同左 |
-
-两者是不同物理实验场景，使用同一套方法；contact66 不是“算法名称”。参数是明确的工程假设，未声称实测校准。热点份额分别约为 0.30 和 0.297，compute24 热点典型负载约为 $16\times0.1\times60/70=1.37$；分母是每星 70 Gcycles/s，不是将三颗星容量错误放大十倍。具体 CPU 随固定回放 seed 变化，应查看 `calibration.json`。
-
-| 模型部分 | 实现 |
+| 符号 | 含义 / 单位 |
 |---|---|
-| 轨道、物理 ISL 与缓存 | `topology/walker.py`、`topology/graph_builder.py`、`topology/topology_cache.py` |
-| 任务与异构 CPU | `tasks/task_generator.py`、`env/leo_env.py` |
-| 只输出计算卫星的 PPO | `models/destination_scorer.py`、`agents/ppo_agent.py` |
-| 有限未来接触与选定节点路由 | `network/contact_plan.py`、`routing/contact_aware_router.py` |
-| 预测预约 | `routing/reservations.py` |
-| 动态真实执行、回退记录 | `env/event_engine.py`、`routing/action_builder.py` |
-| KKT 分配 | `resource/cpu_allocator.py`、`resource/link_allocator.py` |
-| 代价、成功、断链与路由拒绝 | `env/reward.py`、`env/metrics.py` |
-
-当前版本固定训练回放 seed 2026；验证与开发评估使用同一 seed 100。复用验证数据的比较不叫独立测试，单 seed 不产生置信区间。完成任务均值/P95 必须与成功率、实际断链率、路由拒绝率和截尾率共同报告。`node_greedy` 使用相同预测路由、预约和资源分配，是区分长期学习与当步贪心的对照。论文结论以正式训练和这些一致对照为依据。
+| $\mathcal S,\mathcal E[n]$ | 卫星集合、时隙 ISL 集合 |
+| $\delta t,N,N_d$ | 时隙长度（s）、到达时隙数、最大排空时隙数 |
+| $s_u,s_u^*$ | 源卫星、实际计算卫星 |
+| $D_u,C_u,W_u,\tau_u$ | bit、cycles/bit、cycles、s |
+| $\mathcal P_u,H_p$ | 传输路径、最大路径跳数 |
+| $R_e,r_{u,e}$ | 链路预算、任务分配速率（bit/s） |
+| $F_s,f_{s,u}$ | 计算预算、任务分配速率（cycles/s） |
+| $Q_s,I_s,B_e^{\rm tx}$ | 驻留 cycles、在途 cycles、发送积压 bit |
+| $\mathcal C_e,H,K_{e,k}$ | 接触窗口集合、后续快照数、窗口容量 bit |
+| $T_u,H_n,C_n^{\rm sys}$ | 完成时延、持有成本、系统时隙成本（s） |
+| $M_n,J_n$ | 新期限违约数、实际断链失败数 |

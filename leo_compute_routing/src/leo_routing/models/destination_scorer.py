@@ -17,3 +17,10 @@ class DestinationScorer(nn.Module):
         return self.score(torch.cat((nodes, nodes[source].expand(count, -1),
             context.expand(count, -1), self.task_encoder(task).expand(count, -1),
             self.destination_encoder(features)), -1)).squeeze(-1)
+
+    def forward_many(self, nodes, context, tasks, features, sources, slots):
+        count = nodes.shape[1]
+        return self.score(torch.cat((nodes[slots], nodes[slots, sources][:, None].expand(-1, count, -1),
+            context[slots, None].expand(-1, count, -1),
+            self.task_encoder(tasks)[:, None].expand(-1, count, -1),
+            self.destination_encoder(features)), -1)).squeeze(-1)

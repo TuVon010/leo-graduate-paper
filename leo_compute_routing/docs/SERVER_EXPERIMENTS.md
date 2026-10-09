@@ -1,11 +1,11 @@
 # 服务器实验命令
 
-在 `leo_compute_routing/` 下执行。新代码的 PPO 只选择计算卫星，旧 checkpoint 不可续训；使用一个全新的输出根目录。训练初始化及任务回放都固定为 2026，验证与当前开发比较固定为 100。服务器默认顺序运行，不会自动启动多 seed 训练。
+在 `leo_compute_routing/` 下执行。当前先运行 `coupled24`，不默认启动 66 星。PPO 只选择计算卫星，训练初始化及任务回放都固定为 2026，验证与当前开发比较固定为 100。服务器顺序运行 GAT 和 MLP，不会自动启动多 seed 训练。schema=3 权重仍能读取；新物理场景必须从头训练到一个全新的输出根目录，schema=1/2 权重不可恢复。
 
 ## 1. 环境检查与功能检查
 
 ```bash
-conda activate leo-paper2
+conda activate leo-contact
 python -c "import torch; print(torch.__version__); print('CUDA_available=', torch.cuda.is_available())"
 python -m pytest -q
 python -u scripts/train_ppo.py --config configs/rl_smoke.yaml \
@@ -14,37 +14,51 @@ python -u scripts/train_ppo.py --config configs/rl_smoke.yaml \
 
 需要创建环境时见 [ENVIRONMENT.md](ENVIRONMENT.md)。现有 PyTorch 环境可继续使用，架构重构不增加新依赖。模拟器和图搜索运行于 CPU，网络前向/反向可使用 GPU。`--device auto` 自动选择；需强制 GPU 时用服务器入口 `--device cuda` 或单训练入口 `--set rl.device=cuda`。
 
-## 2. 第一轮主实验：重新训练 40 updates
+当前 `coupled24` 使用 CPU 顺序采样 + GPU 批量 PPO 更新。看到 `rollout=cpu PPO_update=cuda` 表示正常使用 GPU 训练；不是没有启用 GPU。每次 update 后同步采样权重，采样/更新设备都会保存到 manifest。
+
+## 2. 先测速，再运行 24 星预实验
+
+先用同一冻结 rollout 比较原逐时隙评分与批量评分；只测计算速度，不代表收敛或最终性能：
+
+```bash
+python -u scripts/benchmark_training.py --config configs/experiments/coupled24.yaml \
+  --device cuda --steps 64 --repeats 5 \
+  --output "results/speed_$(date +%Y%m%d_%H%M%S).json"
+```
+
+然后训练 40 updates：
+
+代码已在服务器通过 123 项测试，并完成完整时域的测速与场景预检查；已有服务器代码可直接运行下列命令。按冷启动耗时，GAT 与 MLP 各 40 updates 顺序训练约 3–3.5 h，另加基线评估时间；训练改善后可能更快。测速详情和启动指标见 [VALIDATION.md](VALIDATION.md)。不要把微基准倍数当成总耗时倍数。
 
 ```bash
 STAMP=$(date +%Y%m%d_%H%M%S)
-RUN="results/hierarchical_${STAMP}"
+RUN="results/coupled24_${STAMP}"
 nohup python -u scripts/run_server_experiments.py \
-  --suite main --phase both --cases compute24 contact66 \
+  --suite main --phase both --cases coupled24 \
   --updates 40 --device auto --output "$RUN" \
-  > "hierarchical_${STAMP}.log" 2>&1 &
-tail -f "hierarchical_${STAMP}.log"
+  > "coupled24_${STAMP}.log" 2>&1 &
+tail -f "coupled24_${STAMP}.log"
 ```
 
-`main` 会在两个场景分别独立训练 GAT-PPO 和 MLP-PPO，并在 seed 100 比较 local、shortest_offload、least_load、computing_aware、computing_aware_future、batch_greedy、node_greedy。后者与提出的方法共用接触路由、预约及资源，是区分节点长期学习收益的必要对照。40 updates 是预实验，不预先认定已收敛。
+`main` 只在 `coupled24` 独立训练 GAT-PPO 和 MLP-PPO，并在 seed 100 比较 local、shortest_offload、least_load、computing_aware、computing_aware_future、batch_greedy、node_greedy。后者与提出的方法共用接触路由、预约及资源，是区分节点学习收益的必要对照。40 updates 是预实验，不预先认定已收敛。新场景参数和审计见 [SCENARIOS.md](SCENARIOS.md)。
 
 如果只想先训练，将 `--phase both` 换成 `--phase train`；结束后对同一个 `$RUN` 执行：
 
 ```bash
 python -u scripts/run_server_experiments.py --suite main --phase evaluate \
-  --cases compute24 contact66 --updates 40 --output "$RUN"
+  --cases coupled24 --updates 40 --output "$RUN"
 ```
 
 控制台包含 update/episode/slot 进度、FPS、ETA、设备实际使用情况、reward、平均/P95 时延、成功率、期限违约、实际路由失败、路由拒绝、截尾、任务代价、CPU/链路利用率以及 PPO loss/KL/entropy/梯度/价值误差。
 
 ## 3. 继续到 200 updates
 
-仅能从**新版** `last.pt` 继续；保持场景和学习参数相同，把总 update 数加大，写入新目录：
+仅能从同一 `coupled24` 场景的 schema=3 `last.pt` 继续；保持场景和学习参数相同，把总 update 数加大，写入新目录。不能把旧 compute24 的 checkpoint 当作新场景的续训起点：
 
 ```bash
-MORE="results/hierarchical_200_$(date +%Y%m%d_%H%M%S)"
+MORE="results/coupled24_200_$(date +%Y%m%d_%H%M%S)"
 python -u scripts/run_server_experiments.py --suite main --phase both \
-  --cases compute24 contact66 --updates 200 --resume-root "$RUN" --output "$MORE"
+  --cases coupled24 --updates 200 --resume-root "$RUN" --output "$MORE"
 ```
 
 ## 4. 路由、节点决策与资源消融
@@ -53,11 +67,11 @@ python -u scripts/run_server_experiments.py --suite main --phase both \
 
 ```bash
 python -u scripts/run_server_experiments.py --suite routing --phase both \
-  --cases compute24 contact66 --updates 200 --output "results/routing_$(date +%Y%m%d_%H%M%S)"
+  --cases coupled24 --updates 200 --output "results/routing_$(date +%Y%m%d_%H%M%S)"
 python -u scripts/run_server_experiments.py --suite modules --phase both \
-  --cases compute24 contact66 --updates 200 --output "results/modules_$(date +%Y%m%d_%H%M%S)"
+  --cases coupled24 --updates 200 --output "results/modules_$(date +%Y%m%d_%H%M%S)"
 python -u scripts/run_server_experiments.py --suite resource --phase both \
-  --cases compute24 contact66 --updates 200 --output "results/resource_$(date +%Y%m%d_%H%M%S)"
+  --cases coupled24 --updates 200 --output "results/resource_$(date +%Y%m%d_%H%M%S)"
 ```
 
 `routing` 对比完整方法、snapshot_route、no_future；`modules` 对比完整方法、no_booking、no_node_mask；`resource` 对比 KKT 平方根与等分，按各自训练时资源配置评估。模块定义见 [METHOD.md](METHOD.md)。
@@ -73,11 +87,11 @@ python -u scripts/run_server_experiments.py --suite scale --phase both \
 
 ## 6. 负载与物理参数敏感性
 
-必须先完成主实验，以下 `$RUN` 应指向保存了 compute24/contact66 的完整方法与 MLP `best.pt` 的根目录：
+必须先完成主实验，以下 `$RUN` 应指向保存了 coupled24 的完整方法与 MLP `best.pt` 的根目录：
 
 ```bash
 python -u scripts/run_server_experiments.py --suite sensitivity --phase evaluate \
-  --cases compute24 contact66 --output "$RUN"
+  --cases coupled24 --output "$RUN"
 ```
 
 冻结模型，扫描负载、CPU、带宽、deadline 与前视窗口；参数点及结果保存在该根目录。与开发比较一致使用 seed 100，应标注验证复用，不叫独立测试。不要根据单个有利参数点删掉其他结果。
@@ -86,7 +100,7 @@ python -u scripts/run_server_experiments.py --suite sensitivity --phase evaluate
 
 ```bash
 python -u scripts/run_server_experiments.py --suite audit \
-  --cases compute24 contact66 --output "results/audit_$(date +%Y%m%d_%H%M%S)"
+  --cases coupled24 --output "results/audit_$(date +%Y%m%d_%H%M%S)"
 ```
 
 输出真实源分布、热点/全局计算负载、期限下界、拓扑变化与逐目标路径接触暴露。审计使用空系统与均匀抽样时刻，不把这些预测当成实际策略失败率。

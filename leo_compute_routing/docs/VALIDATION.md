@@ -1,5 +1,29 @@
 # 新版实现验证记录
 
+## 2026-10-09：服务器实测耗时与预实验检查
+
+同一 compute24、GAT、2 episodes、4 epochs、304 次优化步骤的首个 update：旧实现采样 97.99 s、优化 144.26 s；新版采样 104.00 s、优化 3.58 s。排除验证后合计由 242.25 s 降至 107.58 s，约 2.25 倍；优化部分约 40 倍。新版首 update 额外执行了最终验证，因此不把包含不同验证日程的总耗时直接比较。服务器冻结 minibatch 微基准的约 141/193 倍仅指 GAT/MLP 评分与反向，不是整套训练速度。
+
+coupled24 的 CPU 采样 / CUDA 更新完整首 update：GAT 总耗时约 215 s，MLP 约 212 s，各包含两条 600 s 训练回放与一次最终验证；优化分别约 3.91/3.11 s。该场景比旧 compute24 更拥塞，不能据此直接比较采样设备的速度。40 updates、每 5 updates 验证的 main 两种编码器顺序运行，按冷启动耗时估计约 3–3.5 h，加上基线评估略有增加；策略改善后排空与队列负担可能下降，实际时间以日志 ETA 为准。
+
+另用完全相同的初始观测、权重及 5 个任务测量确定性节点选择与路由，CPU/CUDA 动作一致；预热后 30 次中位数分别为 4.69/9.99 ms。该小图决策检查支持当前 CPU 采样配置，不代表整个 episode 恒定快 2.13 倍。原始数据为 `results/rollout_device_speed_20261009.json`。
+
+seed 100 的 coupled24 预检查：computing_aware 成功率 93.23%、任务代价 2.144 s，node_greedy 成功率 95.35%、任务代价 1.910 s，两者截尾均为 0。冷启动 1 update 的 GAT/MLP 验证成功率仅约 49.48%/50.38%，队列与远程拒绝偏高，不构成方法效果验证；现阶段只确认实现可运行和训练加速。
+
+服务器保留路径：`results/optimized_compute24_timing_20261008/`、`results/coupled24_full_timing_20261008/`、`results/coupled24_preflight_100m_20261009/`，以及 150 Mbit/s 的参数控制 `results/coupled24_preflight_150m_20261009/`。原 66 星进程在保留 update 7 的 last.pt 后停止；历史 24/66 星数据没有删除。
+
+## 2026-10-08：24 星场景与训练加速
+
+- 当前优先 `coupled24`，服务器入口默认只运行该 24 星场景。原 compute24、66 星配置与全部历史结果保留。
+- 本地与 Ubuntu/RTX 4070 Ti 服务器均通过 **123 项测试**，包含 CPU/CUDA、GAT/MLP 批量似然、熵、价值与梯度等价性、变长任务/空时隙、CPU 采样副本权重同步和 checkpoint 加载。
+- 带预测预约的小图路由结果与穷举代价比较一致；缓存估计提交不重复计算。共享路由的加速也作用于基线。
+- schema=3 的网络参数结构保持兼容；coupled24 改变物理配置，必须新建训练目录，不续用旧场景的训练轨迹。
+- 70°/100 Mbit/s/20 任务每秒/8 s 前视场景经过轨道、负载、期限下界和空系统路由暴露审计；详见 [SCENARIOS.md](SCENARIOS.md)。
+- `results/batched_speed_check_20261008.json`、`results/batched_speed_cpu_check_20261008.json` 为本地冻结 rollout 微基准，不属于模型效果实验。服务器完整时域测速保存在 `results/optimized_compute24_timing_20261008/`、`results/coupled24_full_timing_20261008/`。
+- 新实现没有改变采样量、4 epochs、PPO 联合概率目标、GAE、奖励或资源分配。CPU 采样仍为同权重模型，GPU 用于批量更新；微基准加速倍数不能当作整套训练加速倍数。
+
+## 2026-10-07 记录
+
 日期：2026-10-07。当前架构为计算卫星 GAT-PPO → 后置预测接触图路由 → KKT 资源共享，feature schema=3。旧联合动作、KSP、完成时间 logit 先验及旧配置已移除；既有 `results/` 数据和日志保留，历史说明见 [HISTORICAL_RESULTS.md](HISTORICAL_RESULTS.md)。
 
 ## 回归与接口

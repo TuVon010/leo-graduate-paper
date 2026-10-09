@@ -63,14 +63,20 @@ class ContactPlan:
     @classmethod
     def from_trace(cls, trace, slot, lookahead_slots):
         stop = min(trace.slots, slot + lookahead_slots + 1)
-        arrays = [np.array(a[slot:stop], copy=True) for a in
+        # TopologyTrace owns immutable arrays; read-only views preserve snapshots.
+        arrays = [a[slot:stop] for a in
                   (trace.adjacency, trace.capacities, trace.distances)]
         for array in arrays:
             array.setflags(write=False)
         adjacency, capacities, distances = arrays
         start, end = slot * trace.slot_seconds, stop * trace.slot_seconds
         windows = []
+        stable = np.all(adjacency == adjacency[0])
         for i, j in zip(*np.where(np.triu(adjacency.any(axis=0), 1))):
+            if stable:
+                windows.append(ContactWindow((int(i), int(j)), start, end,
+                    float(capacities[:, i, j].sum() * trace.slot_seconds), False))
+                continue
             active = adjacency[:, i, j]
             changes = np.diff(np.r_[False, active, False].astype(int))
             for first, last in zip(np.flatnonzero(changes == 1), np.flatnonzero(changes == -1)):

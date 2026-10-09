@@ -37,6 +37,19 @@ class AttentionLayer(nn.Module):
         aggregated = torch.einsum("hij,jhd->ihd", attention, transformed).reshape(count, -1)
         return self.norm(nodes + F.elu(self.output(aggregated)))
 
+    def forward_dense(self, nodes, adjacency, edges):
+        """The same attention equations for a batch of independent graphs."""
+        batch, count, _ = nodes.shape
+        transformed = self.projection(nodes).reshape(batch, count, self.heads, self.channels)
+        source = (transformed * self.source_attention).sum(-1).transpose(1, 2)
+        target = (transformed * self.target_attention).sum(-1).transpose(1, 2)
+        edge_scores = self.edge_attention(edges).permute(0, 3, 1, 2)
+        scores = F.leaky_relu(target[:, :, :, None] + source[:, :, None, :] + edge_scores,
+                             negative_slope=0.2)
+        attention = torch.softmax(scores.masked_fill(~adjacency[:, None], -torch.inf), dim=-1)
+        aggregated = torch.einsum("bhij,bjhd->bihd", attention, transformed).reshape(batch, count, -1)
+        return self.norm(nodes + F.elu(self.output(aggregated)))
+
 
 class GATEncoder(nn.Module):
     def __init__(self, node_dim, edge_dim, hidden_dim, heads=4, layers=2):
@@ -48,4 +61,10 @@ class GATEncoder(nn.Module):
         hidden = F.elu(self.input(nodes))
         for layer in self.layers:
             hidden = layer(hidden, edge_index, edges)
+        return hidden
+
+    def forward_dense(self, nodes, adjacency, edges):
+        hidden = F.elu(self.input(nodes))
+        for layer in self.layers:
+            hidden = layer.forward_dense(hidden, adjacency, edges)
         return hidden

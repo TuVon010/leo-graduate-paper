@@ -1,0 +1,13 @@
+# 24-satellite communication/compute coupling pilot; all methods share physics.
+extends: compute24.yaml
+topology:
+  inclination_deg: 70.0
+  link_capacity_bps: 100000000.0
+tasks:
+  arrival_rate_per_slot: 5.0
+routing:
+  lookahead_slots: 32
+reward:
+  normalizer: 5.0
+rl:
+  rollout_device: cpu

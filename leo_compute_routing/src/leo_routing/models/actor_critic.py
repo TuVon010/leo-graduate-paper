@@ -6,6 +6,7 @@ from torch.distributions import Categorical
 from ..agents.features import NODE_DIM, EDGE_DIM, CONTEXT_DIM, TASK_DIM, DESTINATION_DIM
 from .destination_scorer import DestinationScorer
 from .gat_encoder import GATEncoder
+from .rollout_tensors import RolloutTensors
 
 
 class ActorCritic(nn.Module):
@@ -62,3 +63,27 @@ class ActorCritic(nn.Module):
             log_prob = log_prob + distribution.log_prob(torch.tensor(action, device=self.device))
             entropy = entropy + distribution.entropy()
         return log_prob, entropy, encoded[2]
+
+    def prepare_rollout(self, batches):
+        return RolloutTensors.pack(batches, self.device, self.is_gat)
+
+    def evaluate_minibatch(self, rollout, indices):
+        slots, tasks, local_slots = rollout.select(indices)
+        inputs = rollout.nodes[slots]
+        nodes = (self.graph_encoder.forward_dense(inputs, rollout.adjacency[slots], rollout.edges[slots])
+                 if self.is_gat else self.graph_encoder(inputs))
+        pooled = torch.cat((nodes.mean(1), nodes.max(1).values, rollout.context[slots]), -1)
+        context = self.context_encoder(pooled)
+        values = self.value_network(context).squeeze(-1) * self.value_scale
+        # Preserve differentiable zero log probabilities for task-free slots.
+        joint_logs, joint_entropy = values * 0, values * 0
+        if len(tasks):
+            logits = self.scorer.forward_many(nodes, context, rollout.tasks[tasks],
+                rollout.destinations[tasks], rollout.sources[tasks], local_slots)
+            masks = rollout.masks[tasks]
+            log_probs = torch.log_softmax(logits.masked_fill(~masks, -torch.inf), -1)
+            chosen = log_probs.gather(1, rollout.actions[tasks, None]).squeeze(1)
+            entropy = -(log_probs.exp() * log_probs.masked_fill(~masks, 0)).sum(-1)
+            joint_logs = joint_logs.scatter_add(0, local_slots, chosen)
+            joint_entropy = joint_entropy.scatter_add(0, local_slots, entropy)
+        return joint_logs, joint_entropy, values

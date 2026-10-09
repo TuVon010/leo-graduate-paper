@@ -66,8 +66,9 @@ class ReservationCalendar:
             calendar._commit(route, job.compute_sat, cpu)
         return calendar
 
-    def estimate(self, task, action):
-        route = self.plan.predict(task, action.path, self.rate_fraction, self.links)
+    def estimate(self, task, action, route=None):
+        if route is None:
+            route = self.plan.predict(task, action.path, self.rate_fraction, self.links)
         arrival = self.plan.start + route.route_seconds
         cpu = first_free_interval(self.cpu.get(action.compute_sat, ()), arrival,
                                   task.total_cycles / self.capacities[action.compute_sat])
@@ -87,7 +88,8 @@ class ReservationCalendar:
             self.cpu.setdefault(satellite, []).append(cpu)
             self.cpu[satellite].sort()
 
-    def commit(self, task, action):
-        estimate = self.estimate(task, action)
+    def commit(self, task, action, estimate=None):
+        if estimate is None:
+            estimate = self.estimate(task, action)
         self._commit(estimate.route, action.compute_sat, estimate.cpu_interval)
         return estimate

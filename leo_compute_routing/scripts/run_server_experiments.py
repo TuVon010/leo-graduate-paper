@@ -21,6 +21,7 @@ from leo_routing.utils.console import capture_console, console_log_path
 
 
 CASES = {
+    "coupled24": "configs/experiments/coupled24.yaml",
     "compute24": "configs/experiments/compute24.yaml",
     "contact66": "configs/experiments/contact66.yaml",
     "contact66_balanced": "configs/experiments/contact66_balanced.yaml",
@@ -243,7 +244,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=SUITES, default="main")
     parser.add_argument("--phase", choices=["train", "evaluate", "both"], default="both")
-    parser.add_argument("--cases", choices=CASES, nargs="+", default=["compute24", "contact66"])
+    parser.add_argument("--cases", choices=CASES, nargs="+", default=["coupled24"],
+                        help="Current pilot defaults to coupled24 only; other cases require an explicit selection")
     parser.add_argument("--initializations", type=int, nargs="+", default=[2026])
     parser.add_argument("--test-seeds", type=int, nargs="+",
                         help="Default: seed 100 with labeled validation reuse; scale uses held-out seed 301")
