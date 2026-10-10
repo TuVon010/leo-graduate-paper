@@ -40,7 +40,11 @@ def load_config(path, overrides=None, _parents=()):
                 raise ValueError("Unknown configuration key: %s" % key)
             target = target[part]
         if parts[-1] not in target:
-            raise ValueError("Unknown configuration key: %s" % key)
+            # Optional RL controls can be overridden without inserting defaults
+            # into historical resolved configs (which would break resume hashes).
+            from .agents.settings import DEFAULTS as RL_DEFAULTS
+            if len(parts) != 2 or parts[0] != "rl" or parts[-1] not in RL_DEFAULTS:
+                raise ValueError("Unknown configuration key: %s" % key)
         target[parts[-1]] = yaml.safe_load(value)
     validate_config(config)
     return config

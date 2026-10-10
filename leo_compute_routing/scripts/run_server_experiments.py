@@ -36,6 +36,10 @@ VARIANTS = {
     "no_booking": ["rl.use_reservations=false"],
     "no_node_mask": ["rl.use_mask=false"],
     "equal": ["resource.allocation=equal"],
+    "self_graph": ["rl.graph_neighbors=self"],
+    "mlp_kkt": ["rl.encoder=mlp", "rl.feature_set=kkt"],
+    "gat_kkt": ["rl.feature_set=kkt"],
+    "gated_kkt": ["rl.encoder=gated_gat", "rl.feature_set=kkt"],
 }
 SUITES = {
     "main": ["full", "mlp"],
@@ -43,9 +47,10 @@ SUITES = {
     "modules": ["full", "no_booking", "no_node_mask"],
     "resource": ["full", "equal"],
     "scale": ["full", "mlp"],
-    "all": list(VARIANTS),
+    "all": ["full", "mlp", "snapshot_route", "no_future", "no_booking", "no_node_mask", "equal"],
     "audit": [],
     "sensitivity": ["full", "mlp"],
+    "representations": ["full", "mlp", "self_graph", "mlp_kkt", "gat_kkt", "gated_kkt"],
 }
 BASELINES = ["local", "shortest_offload", "least_load", "computing_aware",
              "computing_aware_future", "batch_greedy", "node_greedy"]
@@ -243,6 +248,8 @@ def sensitivity(args, case):
 def parse_args():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=SUITES, default="main")
+    parser.add_argument("--variants", choices=VARIANTS, nargs="+",
+                        help="Select explicit variants, e.g. one per tmux window in the representations suite")
     parser.add_argument("--phase", choices=["train", "evaluate", "both"], default="both")
     parser.add_argument("--cases", choices=CASES, nargs="+", default=["coupled24"],
                         help="Current pilot defaults to coupled24 only; other cases require an explicit selection")
@@ -260,6 +267,8 @@ def parse_args():
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--log-interval-seconds", type=float, default=10.0)
     args = parser.parse_args()
+    if args.variants and (len(set(args.variants)) != len(args.variants) or args.suite in ("audit", "scale", "sensitivity")):
+        parser.error("Distinct explicit variants apply only to checkpoint comparison suites")
     if args.test_seeds is None:
         development = args.suite != "scale"
         args.test_seeds = [100] if development else [301]
@@ -305,7 +314,7 @@ def run(args):
         for case in args.cases:
             sensitivity(args, case)
         return
-    variants = SUITES[args.suite]
+    variants = args.variants or SUITES[args.suite]
     for index, case in enumerate(args.cases, 1):
         print("[CASE] %s (%s/%s) | suite=%s variants=%s" % (case, index, len(args.cases), args.suite, ",".join(variants)), flush=True)
         if args.phase != "evaluate":

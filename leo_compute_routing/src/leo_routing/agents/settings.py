@@ -3,6 +3,8 @@ import math
 
 DEFAULTS = {
     "encoder": "gat", "hidden_dim": 64, "gat_heads": 4, "gat_layers": 2,
+    "feature_set": "base", "graph_neighbors": "physical",
+    "graph_gate_bias": -3.0,
     "use_future": True, "use_mask": True, "use_reservations": True, "time_scale_seconds": 1.0,
     "value_scale": 100.0,
     "learning_rate": 3e-4, "gamma": 0.995, "gae_lambda": 0.95, "clip_ratio": 0.2,
@@ -19,8 +21,17 @@ def rl_settings(config):
     if not isinstance(supplied, dict) or set(supplied) - set(DEFAULTS):
         raise ValueError("Unknown RL configuration fields: %s" % (set(supplied) - set(DEFAULTS) if isinstance(supplied, dict) else supplied))
     settings = {**deepcopy(DEFAULTS), **deepcopy(supplied)}
-    if settings["encoder"] not in ("mlp", "gat"):
-        raise ValueError("rl.encoder must be mlp or gat")
+    if settings["encoder"] not in ("mlp", "gat", "gated_gat"):
+        raise ValueError("rl.encoder must be mlp, gat or gated_gat")
+    if settings["feature_set"] not in ("base", "kkt"):
+        raise ValueError("rl.feature_set must be base or kkt")
+    if settings["graph_neighbors"] not in ("physical", "self"):
+        raise ValueError("rl.graph_neighbors must be physical or self")
+    if settings["encoder"] == "mlp" and settings["graph_neighbors"] != "physical":
+        raise ValueError("graph_neighbors=self requires a graph encoder")
+    bias = settings["graph_gate_bias"]
+    if isinstance(bias, bool) or not isinstance(bias, (int, float)) or not math.isfinite(bias):
+        raise ValueError("rl.graph_gate_bias must be finite")
     if settings["rollout_device"] not in ("same", "cpu"):
         raise ValueError("rl.rollout_device must be same or cpu")
     for key in ("hidden_dim", "gat_heads", "gat_layers", "epochs", "minibatch_steps", "updates",

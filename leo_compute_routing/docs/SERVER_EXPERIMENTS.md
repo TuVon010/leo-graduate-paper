@@ -1,5 +1,7 @@
 # 服务器实验命令
 
+2026-10-10 新增 [KKT 竞争特征、任务门控图编码与自环对照](REPRESENTATION_EXPERIMENTS.md)。`scripts/launch_representation_tmux.py` 支持在独立 tmux 窗口并发运行，代码检出、结果和缓存可全部放在 `/tmp`。原有 suite 的默认方法保持不变；新增 `--suite representations`，也可用 `--variants` 明确选择方法。
+
 在 `leo_compute_routing/` 下执行。当前先运行 `coupled24`，不默认启动 66 星。PPO 只选择计算卫星，初始化及训练场景根 seed 固定为 2026，每回合的任务、CPU、热点和 Walker 起始轨道时刻不同；验证与开发比较仍固定为 100 和参考历元。服务器顺序运行 GAT 和 MLP，并使用相同的逐回合场景序列，不会自动启动多 seed 训练。schema=3 权重仍能读取；新随机化协议必须从头训练到全新目录，不能从旧 fixed_replay checkpoint 续训。
 
 2026-10-09 检查时服务器 `/home` 分区已满，根分区 `/tmp` 仍有约 141 GB 空闲。当前命令将新输出及总日志写入 `/tmp/leo-routing-zhaojunan_25/results/`；该位置用于本轮运行，完成后应迁移到长期存储。释放 `/home` 空间后，也可改回项目的 `results/`。

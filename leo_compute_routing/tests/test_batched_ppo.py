@@ -12,13 +12,17 @@ from leo_routing.env.leo_env import LeoEnv
 from leo_routing.tasks.task import Task
 
 
-@pytest.mark.parametrize("encoder", ["gat", "mlp"])
+@pytest.mark.parametrize("encoder,feature_set,neighbors", [
+    ("gat", "base", "physical"), ("mlp", "base", "physical"),
+    ("gat", "base", "self"), ("mlp", "kkt", "physical"),
+    ("gat", "kkt", "physical"), ("gated_gat", "kkt", "physical")])
 @pytest.mark.parametrize("device", ["cpu", "cuda"])
-def test_batched_joint_likelihood_entropy_value_and_gradients(tiny_config, encoder, device):
+def test_batched_joint_likelihood_entropy_value_and_gradients(tiny_config, encoder, feature_set, neighbors, device):
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA unavailable")
     config = deepcopy(tiny_config)
-    config["rl"] = dict(encoder=encoder, hidden_dim=16, device=device)
+    config["rl"] = dict(encoder=encoder, feature_set=feature_set, graph_neighbors=neighbors,
+                        hidden_dim=16, device=device)
     trace = ((Task(0, 0, 10, 1, 10, 0), Task(1, 2, 20, 1, 10, 0)),
              (Task(2, 1, 10, 1, 10, 1),), ())
     env, agent = LeoEnv(config, task_trace=trace), PPOAgent(config)
@@ -67,12 +71,12 @@ def test_empty_rollout_and_invalid_masks_are_rejected(tiny_config):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
-@pytest.mark.parametrize("encoder", ["gat", "mlp"])
+@pytest.mark.parametrize("encoder", ["gat", "mlp", "gated_gat"])
 def test_cpu_rollout_matches_cuda_likelihood_and_syncs_after_updates(tiny_config, tmp_path, encoder):
     from leo_routing.agents.rollout_buffer import RolloutBuffer, Transition
     config = deepcopy(tiny_config)
     config["rl"] = dict(encoder=encoder, hidden_dim=16, device="cuda", rollout_device="cpu",
-                        epochs=1, minibatch_steps=4)
+                        epochs=1, minibatch_steps=4, feature_set="kkt")
     agent, env = PPOAgent(config), LeoEnv(config)
     assert agent.model.device.type == "cuda" and agent.rollout_model.device.type == "cpu"
     obs, _ = env.reset()

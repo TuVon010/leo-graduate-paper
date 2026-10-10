@@ -17,7 +17,6 @@ from ..utils.io import save_csv, save_json, save_yaml
 from .ppo_agent import PPOAgent
 from .rollout_buffer import RolloutBuffer, Transition
 from .diagnostics import add_counts, decision_metrics
-from .features import FEATURE_SCHEMA
 from .episode_scenarios import SCENARIO_SCHEMA, episode_configuration, episode_inputs
 from ..utils.progress import EpisodeProgress, device_summary, gpu_memory, duration_text, metric_text, outcome_text
 
@@ -54,6 +53,9 @@ def train_ppo(config, output_directory, resume=None, progress=None, log_interval
     report("[TRAIN] model=%s init_seed=%s updates=%s->%s episodes/update=%s router=%s node_mask=%s allocation=%s" % (
         agent.name, settings["seed"], agent.update_count, settings["updates"], settings["episodes_per_update"],
         config["routing"]["mode"], settings["use_mask"], config["resource"]["allocation"]))
+    report("[REPRESENTATION] features=%s schema=%s node_dim=%s destination_dim=%s graph_neighbors=%s parameters=%s" % (
+        settings["feature_set"], agent.features.schema, agent.features.node_dim, agent.features.destination_dim,
+        settings["graph_neighbors"], sum(p.numel() for p in agent.model.parameters())))
     report("[INFO] Simulator/graph routing runs on CPU. FPS = completed environment slots / wall seconds; "
            "rollout FPS excludes optimizer and validation. ETA is an estimate from completed updates.")
     report("[LEARNING] action=computing_satellite | value_scale=%s | no completion-time prior; "
@@ -68,7 +70,12 @@ def train_ppo(config, output_directory, resume=None, progress=None, log_interval
     output.mkdir(parents=True, exist_ok=True)
     save_yaml(output / "resolved_config.yaml", config)
     save_json(output / "training_manifest.json", {"schema": 1, "config_sha256": fingerprint(config),
-              "feature_schema": FEATURE_SCHEMA,
+              "feature_schema": agent.features.schema,
+              "feature_set": settings["feature_set"], "graph_neighbors": settings["graph_neighbors"],
+              "node_dim": agent.features.node_dim, "destination_dim": agent.features.destination_dim,
+              "parameter_count": sum(p.numel() for p in agent.model.parameters()),
+              "graph_gate_bias": settings["graph_gate_bias"] if agent.model.is_gated else None,
+              "critic_encoding": "own_node_mlp" if agent.model.is_gated else settings["encoder"],
               "action_space": "computing_satellite", "router_mode": configured["routing"]["mode"],
               "value_scale": settings["value_scale"],
               "node_mask": settings["use_mask"], "reservation_is_guarantee": False,
@@ -202,6 +209,10 @@ def train_ppo(config, output_directory, resume=None, progress=None, log_interval
                    metric_text(metrics["approximate_joint_kl"], 6), 100 * metrics["clip_fraction"],
                    metric_text(metrics["gradient_norm"]), metric_text(metrics["explained_variance_before_update"]),
                    metrics["optimizer_steps"], metrics["kl_early_stop"], duration_text(optimization_seconds)))
+        report("[GRADIENT] encoder=%s self_encoder=%s actor_head=%s critic_head=%s graph_gate_mean=%s | norms before global clipping" % (
+            metric_text(metrics["encoder_gradient_norm"]), metric_text(metrics["self_encoder_gradient_norm"]),
+            metric_text(metrics["actor_head_gradient_norm"]), metric_text(metrics["critic_head_gradient_norm"]),
+            metric_text(metrics["graph_gate_mean"])))
         report("[CRITIC] value_mean=%s value_std=%s return_mean=%s return_std=%s raw_value_MSE=%s "
                "normalized_value_MSE=%s mean_gradient_clip_scale=%s" % (
                    metric_text(metrics["value_prediction_mean"]), metric_text(metrics["value_prediction_std"], 6),

@@ -25,7 +25,7 @@ class RolloutTensors:
     offsets: np.ndarray
 
     @classmethod
-    def pack(cls, batches, device, with_edges=True):
+    def pack(cls, batches, device, with_edges=True, destination_dim=None):
         if not batches:
             raise ValueError("Cannot pack an empty rollout")
         count = len(batches[0].graph.nodes)
@@ -33,6 +33,10 @@ class RolloutTensors:
             raise ValueError("A PPO rollout must use one satellite count")
         offsets = np.r_[0, np.cumsum([len(b.decisions) for b in batches])]
         decisions = [d for b in batches for d in b.decisions]
+        destination_dim = (destination_dim if destination_dim is not None else
+                           decisions[0].destination_features.shape[1] if decisions else DESTINATION_DIM)
+        if any(d.destination_features.shape != (count, destination_dim) for d in decisions):
+            raise ValueError("Inconsistent destination feature dimensions in rollout")
         if any(len(b.decisions) != len(b.actions) for b in batches):
             raise ValueError("Decision/action lengths differ")
         if any(not d.mask.any() for d in decisions):
@@ -55,7 +59,7 @@ class RolloutTensors:
                    tensor(edges) if with_edges else None,
                    tensor(np.stack([d.task for d in decisions]) if decisions else np.empty((0, TASK_DIM))),
                    tensor(np.stack([d.destination_features for d in decisions]) if decisions else
-                          np.empty((0, count, DESTINATION_DIM))),
+                          np.empty((0, count, destination_dim))),
                    tensor(np.stack([d.mask for d in decisions]) if decisions else
                           np.empty((0, count)), torch.bool),
                    tensor([d.source for d in decisions], torch.long),

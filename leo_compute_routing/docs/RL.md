@@ -13,7 +13,9 @@
 | `agents/rollout_buffer.py` | 物理时隙 transition 与 GAE |
 | `agents/trainer.py、agents/episode_scenarios.py` | 全局 seed、不同回合场景、公平回放、验证选模、进度和保存 |
 
-GAT 输入每节点 8 维、每有向边 4 维；全局上下文 12 维，任务 5 维，每节点额外决策特征 7 维。没有路径池化或联合动作特征，也没有手工完成时间 logit 先验。固定训练尺度保存在 checkpoint。节点换编号时共享评分等变，argmax 平局与图搜索平局仍可能依赖编号。
+默认 `feature_set=base` 输入每节点 8 维、每有向边 4 维；全局上下文 12 维，任务 5 维，每节点额外决策特征 7 维。`feature_set=kkt` 扩展为节点 11 维、目的星决策 12 维，增加活跃 CPU 任务数、CPU/在途剩余工作量平方根之和、同批预约平方根及共享服务时间代理。它不是实际完成时间，也不用于修改 deadline mask。没有路径池化或联合动作特征，也没有手工完成时间 logit 先验。固定训练尺度保存在 checkpoint。节点换编号时共享评分等变，argmax 平局与图搜索平局仍可能依赖编号。
+
+`encoder=gated_gat` 用自身 MLP 保留节点状态，另一个 GAT 提供图信息。根据当前任务、源星、目的星状态和上下文计算门控，将图信息加入自身编码后评分。初始门控约为 `sigmoid(-3)=0.047`，可在训练中学习；critic 使用自身 MLP 的池化表示，图分支不接收价值损失梯度。`graph_neighbors=self` 是仅自环的 GAT 对照，保留深度与归一化，排除物理邻居聚合。具体对照和部署见 [表示层实验](REPRESENTATION_EXPERIMENTS.md)。
 
 同批任务按期限排序逐个请求计算节点，然后求路径与更新预约；训练保存请求节点的 log probability，整个物理时隙的联合概率比用于 PPO clipping。路由拒绝与真实失败分开，拒绝惩罚用于让策略承担不可执行请求的代价。训练 rollout 为随机采样，验证与评估为确定性 argmax。
 

@@ -10,7 +10,7 @@ from torch.nn import functional as F
 
 from ..models.actor_critic import ActorCritic
 from ..config import fingerprint
-from .features import BatchInput, FeatureBuilder, FEATURE_SCHEMA
+from .features import BatchInput, FeatureBuilder, feature_schema
 from ..routing.reservations import ReservationCalendar
 from ..routing.contact_aware_router import ContactAwareRouter
 from torch.distributions import Categorical
@@ -48,10 +48,15 @@ class PPOAgent:
         self.deterministic = True
         self.use_future = self.settings["use_future"]
         self.name = self.settings["encoder"] + "_ppo"
+        if self.settings["feature_set"] != "base":
+            self.name += "_" + self.settings["feature_set"]
+        if self.settings["graph_neighbors"] == "self":
+            self.name += "_self"
         self.metadata = {"torch": str(torch.__version__), "encoder": self.settings["encoder"],
                          "training_config_sha256": fingerprint(config), "use_future": self.use_future,
                          "use_mask": self.settings["use_mask"], "use_reservations": self.settings["use_reservations"],
-                         "action_space": "computing_satellite", "feature_schema": FEATURE_SCHEMA,
+                         "action_space": "computing_satellite", "feature_schema": self.features.schema,
+                         "feature_set": self.settings["feature_set"], "graph_neighbors": self.settings["graph_neighbors"],
                          "value_scale": self.settings["value_scale"],
                          "rollout_device": str(self.rollout_model.device),
                          "router_mode": config["routing"].get("mode", "contact"),
@@ -66,12 +71,16 @@ class PPOAgent:
     def choose_action(self, observation, deterministic=False):
         model = self.rollout_model
         model.eval()
-        state = self.features.graph_input(observation)
+        competition = (self.features.competition_state(observation)
+                       if self.settings["feature_set"] == "kkt" else None)
+        state = self.features.graph_input(observation, competition)
         encoded = model.encode(state)
         log_probability = encoded[2] * 0
         blocked_mass = encoded[2] * 0
         decisions, chosen, actions = [], [], {}
         reserved_cpu = np.zeros_like(observation.cpu_capacities)
+        reserved_sqrt = np.zeros_like(reserved_cpu)
+        reserved_count = np.zeros_like(reserved_cpu)
         calendar = ReservationCalendar.from_observation(observation)
         router = ContactAwareRouter(observation.routing_settings)
         hop_distances = {}
@@ -83,7 +92,8 @@ class PPOAgent:
                 hop_distances[task.source_sat] = nx.single_source_shortest_path_length(
                     observation.graph, task.source_sat, cutoff=observation.max_compute_hops)
             decision = self.features.decision_input(observation, task, position, reserved_cpu,
-                                                   hop_distances[task.source_sat])
+                                                   hop_distances[task.source_sat], competition,
+                                                   reserved_sqrt, reserved_count)
             logits = model.logits(encoded, decision)
             allowed = model.tensor(decision.mask, torch.bool)
             distribution = Categorical(logits=logits.masked_fill(~allowed, -torch.inf))
@@ -97,6 +107,8 @@ class PPOAgent:
             chosen.append(destination)
             if self.settings["use_reservations"]:
                 reserved_cpu[result.action.compute_sat] += task.total_cycles
+                reserved_sqrt[result.action.compute_sat] += np.sqrt(task.total_cycles)
+                reserved_count[result.action.compute_sat] += 1
                 calendar.commit(task, result.action, result.estimate)
             router_fallback = result.reason in ("no_verified_route", "predicted_deadline")
             diagnostics["decision_count"] += 1
@@ -183,14 +195,26 @@ class PPOAgent:
                     raise FloatingPointError("Nonfinite PPO objective")
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
+                def component_norm(module):
+                    terms = [p.grad.detach().square().sum() for p in module.parameters() if p.grad is not None]
+                    return torch.stack(terms).sum().sqrt() if terms else loss.new_zeros(())
+                encoder_norm = component_norm(self.model.graph_encoder)
+                self_norm = (component_norm(self.model.self_encoder) if self.model.is_gated else loss.new_zeros(()))
+                actor_norm = component_norm(self.model.scorer)
+                critic_norm = component_norm(self.model.value_network)
+                gate_mean = (self.model.scorer.last_gate_mean if self.model.is_gated and has_policy
+                             else loss.new_zeros(()))
                 gradient_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.settings["max_grad_norm"], error_if_nonfinite=True)
                 self.optimizer.step()
                 names = ("loss", "policy_loss", "value_loss", "entropy_per_task", "approximate_joint_kl",
-                         "clip_fraction", "gradient_norm", "raw_value_loss", "gradient_clip_scale")
+                         "clip_fraction", "gradient_norm", "raw_value_loss", "gradient_clip_scale",
+                         "encoder_gradient_norm", "actor_head_gradient_norm", "critic_head_gradient_norm",
+                         "self_encoder_gradient_norm", "graph_gate_mean")
                 scale = (self.settings["max_grad_norm"] / gradient_norm.clamp_min(1e-12)).clamp_max(1)
                 numbers = torch.stack((loss.detach(), policy_loss.detach(), value_loss.detach(),
                     entropy_bonus.detach(), approximate_kl.detach(), clip_fraction.detach(),
-                    gradient_norm.detach(), raw_value_loss.detach(), scale.detach())).cpu().tolist()
+                    gradient_norm.detach(), raw_value_loss.detach(), scale.detach(), encoder_norm,
+                    actor_norm, critic_norm, self_norm, gate_mean)).cpu().tolist()
                 statistics.append(dict(zip(names, numbers)))
                 now = perf_counter()
                 if progress and now - last_report >= log_interval_seconds:
@@ -205,7 +229,8 @@ class PPOAgent:
         self.model.eval()
         self._sync_rollout_model()
         keys = ("loss", "policy_loss", "value_loss", "raw_value_loss", "entropy_per_task", "approximate_joint_kl",
-                "clip_fraction", "gradient_norm", "gradient_clip_scale")
+                "clip_fraction", "gradient_norm", "gradient_clip_scale", "encoder_gradient_norm",
+                "actor_head_gradient_norm", "critic_head_gradient_norm", "self_encoder_gradient_norm", "graph_gate_mean")
         metrics = {key: float(np.mean([row[key] for row in statistics])) if statistics else 0.0 for key in keys}
         predictions = np.asarray([t.value for t in buffer.transitions])
         variance = float(np.var(returns))
@@ -220,7 +245,7 @@ class PPOAgent:
     def save(self, path, training_state=None):
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"checkpoint_schema": 1, "feature_schema": FEATURE_SCHEMA, "config": self.config,
+        payload = {"checkpoint_schema": 1, "feature_schema": self.features.schema, "config": self.config,
                    "model": self.model.state_dict(), "optimizer": self.optimizer.state_dict(),
                    "update_count": self.update_count, "rng_state": deepcopy(self.rng.bit_generator.state),
                    "torch_rng": torch.get_rng_state(), "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
@@ -233,9 +258,10 @@ class PPOAgent:
     def load(cls, path, device=None, restore_optimizer=False):
         # Only tensors and primitive containers are saved: no pickled model/environment objects.
         payload = torch.load(path, map_location="cpu", weights_only=True)
-        if payload.get("checkpoint_schema") != 1 or payload.get("feature_schema") != FEATURE_SCHEMA:
-            raise ValueError("Unsupported checkpoint: old joint-path policies are incompatible. "
-                             "Retrain the satellite-only policy with feature schema 3.")
+        if (payload.get("checkpoint_schema") != 1 or
+                payload.get("feature_schema") != feature_schema(rl_settings(payload["config"]))):
+            raise ValueError("Unsupported checkpoint or feature schema mismatch. "
+                             "Retrain unsupported joint-path policies or use the matching satellite-policy features.")
         agent = cls(payload["config"], device)
         agent.model.load_state_dict(payload["model"])
         agent._sync_rollout_model()
